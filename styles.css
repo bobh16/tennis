@@ -193,17 +193,26 @@ main{max-width:860px;margin:0 auto;
 
 /* queue */
 .queue{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.qrow{display:flex;align-items:center;gap:9px;border:1px solid var(--border);border-radius:10px;padding:6px 10px;background:var(--surface)}
-.qpos{width:22px;text-align:center;font-weight:700;color:var(--faint);flex:none}
-.qname{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qlv{margin-left:auto;font-size:12.5px;color:var(--muted);flex:none}
+.qrow{display:flex;align-items:center;gap:9px;border:1px solid var(--border);border-radius:10px;padding:6px 8px 6px 6px;background:var(--surface)}
+.qrow.dragging{opacity:.95;box-shadow:var(--shadow);background:var(--surface-2);border-color:var(--court)}
+.qhandle{flex:none;color:var(--faint);cursor:grab;font-size:16px;line-height:1;padding:0 3px;touch-action:none;user-select:none}
+.qhandle:active{cursor:grabbing}
+.qpos{width:20px;text-align:center;font-weight:700;color:var(--faint);flex:none}
+.qname{flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qlv{font-size:12.5px;color:var(--muted);flex:none}
 .qgames{font-size:11px;flex:none}
-.qmove{display:flex;gap:3px;flex:none;margin-left:4px}
-.qmove button{width:28px;height:28px;border:1px solid var(--border);background:var(--surface-2);border-radius:7px;font-size:11px;color:var(--fg);line-height:1}
-.qmove button:hover:not(:disabled){background:var(--surface-3)}
-.qmove button:disabled{opacity:.3;cursor:not-allowed}
-.qmove .qx{color:var(--muted);font-size:15px}
-.qmove .qx:hover{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.qacts{display:flex;gap:4px;flex:none;align-items:center}
+.qbtn{border:1px solid var(--border);background:var(--surface-2);border-radius:7px;font-size:12px;font-weight:600;color:var(--fg);padding:0 8px;height:28px;line-height:1}
+.qbtn:hover{background:var(--surface-3)}
+.qbtn.qx{color:var(--muted);font-size:16px}
+.qbtn.qx:hover{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.restrow{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:7px 10px;background:var(--surface)}
+.restrow .qname{flex:1}
+.editbtn{margin-left:8px;flex:none;background:rgba(255,255,255,.16);color:var(--on-court);border:1px solid rgba(255,255,255,.26);border-radius:7px;padding:3px 10px;font-size:12px;font-weight:700}
+.editbtn:hover{background:rgba(255,255,255,.28)}
+.court.editing{outline:2px solid var(--accent);outline-offset:-1px}
+.swapsel{width:100%;margin:3px 0}
+.stat.resting{background:color-mix(in srgb,var(--muted) 16%,transparent);color:var(--muted)}
 
 /* tonight's players table */
 .today th,.today td{padding:8px 10px}

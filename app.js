@@ -10,11 +10,12 @@ const QUEUE_WINDOW = 8; // how far down the queue the auto-matcher looks for a l
 const DEFAULTS = {
   courts: 2, levelDisplay: "text", arrSeq: 0, matchCount: 0,
   pairHist: {}, oppHist: {}, lastResults: null, sessionDate: null,
-  queue: [], active: [],
+  queue: [], active: [], resting: [],
   playersSort: { key: "name", dir: 1 }, playerFilter: "all",
 };
 let S = { players: [] };
 let uiImportOpen = false;
+let editCourt = null; // id of the court currently being edited (swap players)
 
 /* ---------- dates ---------- */
 function todayISO() {
@@ -35,9 +36,11 @@ async function load() {
   if (!S.sessionDate) S.sessionDate = todayISO();
   if (!Array.isArray(S.queue)) S.queue = [];
   if (!Array.isArray(S.active)) S.active = [];
-  // self-heal: every player marked present must be in the queue or on a court
-  const placed = new Set([...S.queue, ...S.active.flatMap(c => [...c.teamA, ...c.teamB])]);
+  if (!Array.isArray(S.resting)) S.resting = [];
+  // self-heal: every player marked present must be in the queue, resting, or on a court
+  const placed = new Set([...S.queue, ...S.resting, ...S.active.flatMap(c => [...c.teamA, ...c.teamB])]);
   S.queue = S.queue.filter(id => byId(id) && byId(id).present);
+  S.resting = S.resting.filter(id => byId(id) && byId(id).present);
   S.players.filter(p => p.present && !placed.has(p.id))
     .sort((a, b) => ((a.gamesTonight || 0) - (b.gamesTonight || 0)) || ((a.arr || 0) - (b.arr || 0)))
     .forEach(p => S.queue.push(p.id));
@@ -84,12 +87,23 @@ function render() { renderTonight(); renderPlayers(); }
 
 /* ---------- state operations ---------- */
 function addToList(p) { if (!p.present) { p.present = true; p.arr = nextArr(); S.queue.push(p.id); } }
-function removeTonight(id) { const p = byId(id); if (p) p.present = false; S.queue = S.queue.filter(x => x !== id); save(); }
-function moveQueue(id, dir) {
-  const i = S.queue.indexOf(id), j = i + dir;
-  if (i < 0 || j < 0 || j >= S.queue.length) return;
-  [S.queue[i], S.queue[j]] = [S.queue[j], S.queue[i]];
-  save(); refreshLists();
+function removeTonight(id) {
+  const p = byId(id); if (p) p.present = false;
+  S.queue = S.queue.filter(x => x !== id);
+  S.resting = S.resting.filter(x => x !== id);
+  save();
+}
+function skipTurn(id) { S.queue = S.queue.filter(x => x !== id); S.queue.push(id); save(); refreshLists(); }
+function restPlayer(id) { S.queue = S.queue.filter(x => x !== id); if (!S.resting.includes(id)) S.resting.push(id); save(); renderTonight(); }
+function backToQueue(id) { S.resting = S.resting.filter(x => x !== id); if (!S.queue.includes(id)) S.queue.push(id); save(); renderTonight(); }
+function removeFromResting(id) { const p = byId(id); if (p) p.present = false; S.resting = S.resting.filter(x => x !== id); save(); renderTonight(); }
+function swapCourtPlayer(courtId, team, idx, newId) {
+  const court = S.active.find(c => c.id === courtId); if (!court) return;
+  const oldId = court[team][idx]; if (newId === oldId) return;
+  court[team][idx] = newId;
+  S.queue = S.queue.filter(x => x !== newId);
+  S.queue.push(oldId);
+  save(); renderTonight();
 }
 function startOne(num) {
   const ids = pickFoursome(S.queue, byId, QUEUE_WINDOW);
@@ -174,9 +188,22 @@ function renderTonight() {
       <div class="eyebrow">Up next · <span id="queueCount">${S.queue.length}</span> waiting</div>
       <button class="btn ghost sm" id="newSession">New session</button>
     </div>
-    <p class="tiny muted" style="margin:0">Top of the queue plays next. Use ▲▼ to change the order, or × to take someone off.</p>
+    <p class="tiny muted" style="margin:0">Top of the queue plays next. Drag <b>⠿</b> to reorder · <b>⤓</b> skip to the back · <b>Rest</b> to sit out · <b>×</b> to remove.</p>
     <ol class="queue" id="queueList"></ol>
   </div>`;
+
+  // Resting (sitting out)
+  if (S.resting.length) {
+    html += `<div class="card pad stack">
+      <div class="eyebrow">Resting · ${S.resting.length}</div>
+      <p class="tiny muted" style="margin:0">Set aside, not in line. Tap “Back in queue” when they're ready to play again.</p>
+      <div class="stack" style="gap:6px">${S.resting.map(id => { const p = byId(id); return `
+        <div class="restrow"><span class="qname">${esc(p.name)}</span>
+          <span class="qlv num">${p.rating.toFixed(2)}</span>
+          <button class="btn sm primary" data-back="${id}">Back in queue</button>
+          <button class="qbtn qx" data-rmrest="${id}" title="Remove / left">×</button></div>`; }).join("")}</div>
+    </div>`;
+  }
 
   // Everyone here today
   html += `<div class="card pad stack">
@@ -197,9 +224,11 @@ function renderTonight() {
 function activeCourtCard(court) {
   const A = court.teamA.map(byId), B = court.teamB.map(byId);
   const avg = (A[0].rating + A[1].rating + B[0].rating + B[1].rating) / 4;
+  if (editCourt === court.id) return editCourtCard(court, A, B);
   const plRow = p => `<div class="pl"><span class="nm">${esc(p.name)}</span><span class="lv">${p.rating.toFixed(2)}</span></div>`;
   return `<div class="court" data-court-id="${court.id}">
-    <div class="court-hd"><span class="cn">Court ${court.num}</span><span class="cavg">~${avg.toFixed(1)} level</span></div>
+    <div class="court-hd"><span class="cn">Court ${court.num}</span><span class="cavg">~${avg.toFixed(1)} level</span>
+      <button class="editbtn" data-edit="${court.id}" title="Swap players">Edit</button></div>
     <div class="team"><div class="teamtag">Team 1</div>${A.map(plRow).join("")}</div>
     <div class="vs">VS</div>
     <div class="team b"><div class="teamtag">Team 2</div>${B.map(plRow).join("")}</div>
@@ -210,6 +239,23 @@ function activeCourtCard(court) {
     </div>
     <div class="score-cap">Games won · race to 6 (sudden death at 5–5)</div>
     <div class="court-foot"><button class="btn cta finishbtn" data-finish="${court.id}">Match finished ✓</button></div>
+  </div>`;
+}
+function editCourtCard(court, A, B) {
+  const waiting = S.queue.map(byId);
+  const slot = (team, idx, cur) => {
+    const opts = [cur, ...waiting];
+    return `<select class="swapsel" data-court="${court.id}" data-team="${team}" data-idx="${idx}">` +
+      opts.map(p => `<option value="${p.id}" ${p.id === cur.id ? "selected" : ""}>${esc(p.name)} (${p.rating.toFixed(2)})</option>`).join("") +
+      `</select>`;
+  };
+  return `<div class="court editing" data-court-id="${court.id}">
+    <div class="court-hd"><span class="cn">Court ${court.num} · editing</span>
+      <button class="editbtn" data-donedit="${court.id}">Done</button></div>
+    <div class="team"><div class="teamtag">Team 1</div>${slot("teamA", 0, A[0])}${slot("teamA", 1, A[1])}</div>
+    <div class="vs">VS</div>
+    <div class="team b"><div class="teamtag">Team 2</div>${slot("teamB", 0, B[0])}${slot("teamB", 1, B[1])}</div>
+    <div class="court-foot"><p class="tiny faint" style="margin:0">Pick a waiting player to swap someone in. The player you replace goes to the back of the queue.${waiting.length ? "" : " (No one is waiting to swap in.)"}</p></div>
   </div>`;
 }
 function freeCourtCard(num) {
@@ -247,23 +293,56 @@ function renderQueue() {
   if (!waiting) { list.innerHTML = `<li class="tiny faint" style="list-style:none">Queue empty — add players above.</li>`; return; }
   list.innerHTML = S.queue.map((id, i) => {
     const p = byId(id);
-    return `<li class="qrow">
+    return `<li class="qrow" data-id="${id}">
+      <span class="qhandle" title="Drag to reorder" aria-label="Drag to reorder">⠿</span>
       <span class="qpos num">${i + 1}</span>
       <span class="qname">${esc(p.name)}</span>
       <span class="qlv num">${p.rating.toFixed(2)}</span>
       <span class="qgames num faint">${p.gamesTonight || 0}g</span>
-      <span class="qmove">
-        <button data-up="${id}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>▲</button>
-        <button data-down="${id}" aria-label="Move down" ${i === waiting - 1 ? "disabled" : ""}>▼</button>
-        <button class="qx" data-rm="${id}" aria-label="Remove">×</button>
+      <span class="qacts">
+        <button class="qbtn" data-skip="${id}" title="Skip turn — send to the back">⤓</button>
+        <button class="qbtn" data-rest="${id}" title="Sit out (rest)">Rest</button>
+        <button class="qbtn qx" data-rm="${id}" title="Remove / left for the night">×</button>
       </span></li>`;
   }).join("");
+  enableDragReorder(list);
+}
+function enableDragReorder(list) {
+  list.querySelectorAll(".qhandle").forEach(h => {
+    h.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      const dragEl = h.closest(".qrow");
+      dragEl.classList.add("dragging");
+      h.setPointerCapture(e.pointerId);
+      const move = ev => {
+        const vh = window.innerHeight;
+        if (ev.clientY < 70) window.scrollBy(0, -10);
+        else if (ev.clientY > vh - 70) window.scrollBy(0, 10);
+        let before = null;
+        for (const r of list.querySelectorAll(".qrow:not(.dragging)")) {
+          const b = r.getBoundingClientRect();
+          if (ev.clientY < b.top + b.height / 2) { before = r; break; }
+        }
+        if (before) list.insertBefore(dragEl, before); else list.appendChild(dragEl);
+      };
+      const up = () => {
+        h.removeEventListener("pointermove", move);
+        h.removeEventListener("pointerup", up);
+        dragEl.classList.remove("dragging");
+        S.queue = [...list.querySelectorAll(".qrow")].map(li => li.dataset.id);
+        save(); refreshLists();
+      };
+      h.addEventListener("pointermove", move);
+      h.addEventListener("pointerup", up);
+    });
+  });
 }
 function statusOf(id) {
   const c = S.active.find(c => c.teamA.includes(id) || c.teamB.includes(id));
   if (c) return { label: `Court ${c.num}`, kind: "playing" };
   const qi = S.queue.indexOf(id);
   if (qi >= 0) return { label: `Waiting #${qi + 1}`, kind: "waiting" };
+  if (S.resting.includes(id)) return { label: "Resting", kind: "resting" };
   return { label: "—", kind: "idle" };
 }
 function renderToday() {
@@ -525,10 +604,17 @@ function wireTonight() {
   }
   const ql = q("#queueList");
   if (ql) ql.addEventListener("click", e => {
-    const up = e.target.closest("[data-up]"); if (up) { moveQueue(up.dataset.up, -1); return; }
-    const dn = e.target.closest("[data-down]"); if (dn) { moveQueue(dn.dataset.down, 1); return; }
+    const sk = e.target.closest("[data-skip]"); if (sk) { skipTurn(sk.dataset.skip); return; }
+    const rs = e.target.closest("[data-rest]"); if (rs) { restPlayer(rs.dataset.rest); return; }
     const rm = e.target.closest("[data-rm]"); if (rm) { removeTonight(rm.dataset.rm); refreshLists(); updateSearch(); }
   });
+  // resting controls
+  el.querySelectorAll("[data-back]").forEach(b => b.addEventListener("click", () => backToQueue(b.dataset.back)));
+  el.querySelectorAll("[data-rmrest]").forEach(b => b.addEventListener("click", () => { removeFromResting(b.dataset.rmrest); updateSearch(); }));
+  // per-court edit / swap
+  el.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => { editCourt = b.dataset.edit; renderTonight(); }));
+  el.querySelectorAll("[data-donedit]").forEach(b => b.addEventListener("click", () => { editCourt = null; renderTonight(); }));
+  el.querySelectorAll(".swapsel").forEach(s => s.addEventListener("change", () => swapCourtPlayer(s.dataset.court, s.dataset.team, parseInt(s.dataset.idx, 10), s.value)));
   refreshLists(); updateSearch();
 }
 let flashT = null;
