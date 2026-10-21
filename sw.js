@@ -1,6 +1,8 @@
-// Court Sense — service worker. Caches the app shell so it loads and runs
-// with no internet at the court. Bump CACHE to ship a new version.
-const CACHE = "court-sense-v1";
+// Court Sense — service worker.
+// Network-first for our own files so updates always show when online, with a
+// cache fallback so the app still runs offline at the court. Bump CACHE to
+// force older installs to drop their old cache.
+const CACHE = "court-sense-v2";
 const ASSETS = [
   "./",
   "index.html",
@@ -24,20 +26,17 @@ self.addEventListener("activate", e => {
   );
 });
 
-// Cache-first for our own files; network as a fallback; offline navigations
-// fall back to the app shell so the organizer always gets a working screen.
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
+  if (new URL(req.url).origin !== location.origin) return; // let fonts etc. hit the network directly
+  // Network-first: always try fresh, update the cache, fall back to cache offline.
   e.respondWith(
-    caches.match(req).then(hit =>
-      hit || fetch(req).then(res => {
-        if (res && res.ok && new URL(req.url).origin === location.origin) {
-          const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(req, copy));
-        }
+    fetch(req)
+      .then(res => {
+        if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
         return res;
-      }).catch(() => req.mode === "navigate" ? caches.match("index.html") : undefined)
-    )
+      })
+      .catch(() => caches.match(req).then(hit => hit || (req.mode === "navigate" ? caches.match("index.html") : Response.error())))
   );
 });
