@@ -91,14 +91,24 @@ function moveQueue(id, dir) {
   [S.queue[i], S.queue[j]] = [S.queue[j], S.queue[i]];
   save(); renderQueue();
 }
-function startMatch(num) {
+function startOne(num) {
   const ids = pickFoursome(S.queue, byId, QUEUE_WINDOW);
-  if (!ids) return;
+  if (!ids) return false;
   const pairing = bestPairing(ids.map(byId), num, S.pairHist, S.oppHist);
   S.active.push({ id: "m" + (++S.matchCount), num, teamA: pairing.teamA, teamB: pairing.teamB, scoreA: 0, scoreB: 0 });
   S.queue = S.queue.filter(id => !ids.includes(id));
-  S.lastResults = null;
-  save(); renderTonight();
+  return true;
+}
+function startMatch(num) {
+  if (startOne(num)) { S.lastResults = null; save(); renderTonight(); }
+}
+function fillAllCourts() {
+  let started = false;
+  for (const num of freeCourtNums()) {
+    if (S.queue.length < 4) break;
+    if (startOne(num)) started = true;
+  }
+  if (started) { S.lastResults = null; save(); renderTonight(); }
 }
 function finishMatch(cid) {
   const court = S.active.find(c => c.id === cid);
@@ -145,10 +155,16 @@ function renderTonight() {
   </div>`;
 
   // Courts in play (active + free)
+  const free = freeCourtNums();
   const cards = [...S.active].sort((a, b) => a.num - b.num).map(activeCourtCard).join("")
-    + freeCourtNums().map(freeCourtCard).join("");
+    + free.map(freeCourtCard).join("");
+  const startAll = (free.length >= 2 && S.queue.length >= 4)
+    ? `<button class="btn cta sm" id="startAll">Start all open courts →</button>` : "";
   html += `<div class="stack" style="gap:10px">
-    <div class="eyebrow">On court now · ${S.active.length}/${S.courts} court${S.courts > 1 ? "s" : ""} in play</div>
+    <div class="row spread wrap" style="align-items:center;gap:8px">
+      <div class="eyebrow">On court now · ${S.active.length}/${S.courts} court${S.courts > 1 ? "s" : ""} in play</div>
+      ${startAll}
+    </div>
     <div class="courts">${cards}</div>
   </div>`;
 
@@ -181,7 +197,7 @@ function activeCourtCard(court) {
       <div class="scol"><span class="slbl">Team 2</span>${stepper(court.id, "B", court.scoreB)}</div>
     </div>
     <div class="score-cap">Games won · race to 6 (sudden death at 5–5)</div>
-    <div class="court-foot"><button class="btn primary finishbtn" data-finish="${court.id}">Finish match ✓</button></div>
+    <div class="court-foot"><button class="btn primary finishbtn" data-finish="${court.id}">Match finished ✓</button></div>
   </div>`;
 }
 function freeCourtCard(num) {
@@ -460,6 +476,7 @@ function wireTonight() {
   });
   el.querySelectorAll("[data-finish]").forEach(b => b.addEventListener("click", () => finishMatch(b.dataset.finish)));
   el.querySelectorAll("[data-start]").forEach(b => b.addEventListener("click", () => startMatch(parseInt(b.dataset.start, 10))));
+  q("#startAll") && q("#startAll").addEventListener("click", fillAllCourts);
 
   const sb = q("#searchBox");
   if (sb) {
