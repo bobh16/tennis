@@ -213,6 +213,23 @@ main{max-width:860px;margin:0 auto;
 .court.editing{outline:2px solid var(--accent);outline-offset:-1px}
 .swapsel{width:100%;margin:3px 0}
 .stat.resting{background:color-mix(in srgb,var(--muted) 16%,transparent);color:var(--muted)}
+.stat.upnext{background:color-mix(in srgb,var(--court) 16%,transparent);color:var(--court)}
+
+/* staged "up next" cards */
+.court.plan{border-style:dashed}
+.court.plan .court-hd{background:var(--court);color:var(--on-court)}
+.plan-x{padding:2px 8px;font-size:15px}
+.pslot{display:flex;align-items:center;gap:8px;border:1px dashed var(--border);border-radius:9px;padding:5px 8px;margin:4px 0;min-height:40px;background:var(--surface)}
+.pslot.empty{background:var(--surface-2)}
+.pslot.over{outline:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 16%,var(--surface))}
+.pslot.filled{border-style:solid}
+.pslotname{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pslotlv{font-size:12.5px;color:var(--muted);flex:none}
+.pslotx{border:none;background:none;color:var(--faint);font-size:16px;flex:none;padding:0 4px}
+.pslotx:hover{color:var(--bad)}
+.slotsel{width:100%;border:none;background:none;color:var(--muted);font-size:13.5px;padding:2px}
+.dragghost{position:fixed;z-index:1000;pointer-events:none;transform:translate(-50%,-150%);background:var(--court);color:var(--on-court);font-weight:700;font-size:13px;padding:5px 11px;border-radius:9px;box-shadow:var(--shadow);white-space:nowrap}
+.qrow.dragsrc{opacity:.4}
 
 /* tonight's players table */
 .today th,.today td{padding:8px 10px}

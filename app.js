@@ -10,7 +10,7 @@ const QUEUE_WINDOW = 8; // how far down the queue the auto-matcher looks for a l
 const DEFAULTS = {
   courts: 2, levelDisplay: "text", arrSeq: 0, matchCount: 0,
   pairHist: {}, oppHist: {}, lastResults: null, sessionDate: null,
-  queue: [], active: [], resting: [],
+  queue: [], active: [], resting: [], planned: [], planSeq: 0,
   playersSort: { key: "name", dir: 1 }, playerFilter: "all",
 };
 let S = { players: [] };
@@ -37,8 +37,12 @@ async function load() {
   if (!Array.isArray(S.queue)) S.queue = [];
   if (!Array.isArray(S.active)) S.active = [];
   if (!Array.isArray(S.resting)) S.resting = [];
-  // self-heal: every player marked present must be in the queue, resting, or on a court
-  const placed = new Set([...S.queue, ...S.resting, ...S.active.flatMap(c => [...c.teamA, ...c.teamB])]);
+  if (!Array.isArray(S.planned)) S.planned = [];
+  // drop staged slots whose player is no longer present
+  S.planned.forEach(p => { ["teamA", "teamB"].forEach(t => { p[t] = (p[t] || [null, null]).map(id => (id && byId(id) && byId(id).present) ? id : null); }); });
+  // self-heal: every player marked present must be in the queue, resting, staged, or on a court
+  const stagedIds = S.planned.flatMap(p => [...p.teamA, ...p.teamB]).filter(Boolean);
+  const placed = new Set([...S.queue, ...S.resting, ...stagedIds, ...S.active.flatMap(c => [...c.teamA, ...c.teamB])]);
   S.queue = S.queue.filter(id => byId(id) && byId(id).present);
   S.resting = S.resting.filter(id => byId(id) && byId(id).present);
   S.players.filter(p => p.present && !placed.has(p.id))
@@ -105,6 +109,63 @@ function swapCourtPlayer(courtId, team, idx, newId) {
   S.queue.push(oldId);
   save(); renderTonight();
 }
+
+/* ---------- staged "up next" matches ---------- */
+function planById(id) { return S.planned.find(p => p.id === id); }
+function planReady(plan) { return ![...plan.teamA, ...plan.teamB].some(x => !x); }
+function addPlan() { S.planned.push({ id: "pl" + (++S.planSeq), teamA: [null, null], teamB: [null, null] }); save(); renderTonight(); }
+function assignToSlot(id, planId, team, idx) {
+  const plan = planById(planId); if (!plan) return;
+  const prev = plan[team][idx];
+  S.queue = S.queue.filter(x => x !== id);
+  if (prev && prev !== id) S.queue.push(prev);
+  plan[team][idx] = id;
+  save(); renderTonight();
+}
+function unslot(planId, team, idx) {
+  const plan = planById(planId); if (!plan) return;
+  const pid = plan[team][idx]; plan[team][idx] = null;
+  if (pid) S.queue.push(pid);
+  save(); renderTonight();
+}
+function clearPlan(planId) {
+  const plan = planById(planId); if (!plan) return;
+  ["teamA", "teamB"].forEach(t => plan[t].forEach((id, i) => { if (id) { S.queue.push(id); plan[t][i] = null; } }));
+  save(); renderTonight();
+}
+function removePlan(planId) {
+  const plan = planById(planId); if (!plan) return;
+  [...plan.teamA, ...plan.teamB].forEach(id => { if (id) S.queue.push(id); });
+  S.planned = S.planned.filter(p => p.id !== planId);
+  save(); renderTonight();
+}
+function autofillPlan(planId) {
+  const plan = planById(planId); if (!plan) return;
+  const slots = [["teamA", 0], ["teamA", 1], ["teamB", 0], ["teamB", 1]];
+  const empties = slots.filter(([t, i]) => !plan[t][i]);
+  if (!empties.length) return;
+  const filled = [...plan.teamA, ...plan.teamB].filter(Boolean).map(byId);
+  if (filled.length === 0) {
+    const four = pickFoursome(S.queue, byId, QUEUE_WINDOW);
+    if (four) {
+      const pr = bestPairing(four.map(byId), 0, S.pairHist, S.oppHist);
+      plan.teamA = [pr.teamA[0], pr.teamA[1]]; plan.teamB = [pr.teamB[0], pr.teamB[1]];
+      S.queue = S.queue.filter(id => !four.includes(id));
+      save(); renderTonight(); return;
+    }
+  }
+  const anchorR = filled.length ? filled.reduce((s, p) => s + p.rating, 0) / filled.length : 3.5;
+  const picks = [...S.queue].sort((a, b) => Math.abs(byId(a).rating - anchorR) - Math.abs(byId(b).rating - anchorR)).slice(0, empties.length);
+  empties.forEach(([t, i], k) => { if (picks[k]) plan[t][i] = picks[k]; });
+  S.queue = S.queue.filter(id => !picks.includes(id));
+  save(); renderTonight();
+}
+function startPlanned(planId, num) {
+  const plan = planById(planId); if (!plan || !planReady(plan)) return false;
+  S.active.push({ id: "m" + (++S.matchCount), num, teamA: [plan.teamA[0], plan.teamA[1]], teamB: [plan.teamB[0], plan.teamB[1]], scoreA: 0, scoreB: 0 });
+  S.planned = S.planned.filter(p => p.id !== planId);
+  return true;
+}
 function startOne(num) {
   const ids = pickFoursome(S.queue, byId, QUEUE_WINDOW);
   if (!ids) return false;
@@ -135,11 +196,15 @@ function finishMatch(cid) {
   S.active = S.active.filter(c => c.id !== cid);
   S.queue.push(...court.teamA, ...court.teamB);
   S.lastResults = { court: court.num, changes };
+  // start-on-finish: load the first ready staged match onto this freed court
+  const ready = S.planned.find(planReady);
+  if (ready) startPlanned(ready.id, court.num);
   save(); renderTonight(); renderPlayers();
 }
 function newSession() {
   S.players.forEach(p => { p.present = false; p.gamesTonight = 0; p.lastRound = -99; });
-  S.queue = []; S.active = []; S.lastResults = null; S.matchCount = 0; S.arrSeq = 0;
+  S.queue = []; S.active = []; S.resting = []; S.planned = []; S.lastResults = null;
+  S.matchCount = 0; S.arrSeq = 0;
   S.sessionDate = todayISO();
   save(); renderTonight();
 }
@@ -182,10 +247,22 @@ function renderTonight() {
     <div class="courts">${cards}</div>
   </div>`;
 
+  // Up next — staged matches you build by hand
+  const freeNum = free[0] || null;
+  html += `<div class="stack" style="gap:10px">
+    <div class="row spread wrap" style="align-items:center;gap:8px">
+      <div class="eyebrow">Up next · build the next games</div>
+      <button class="btn sm" id="addPlan">+ Add next game</button>
+    </div>
+    ${S.planned.length
+      ? `<div class="courts">${S.planned.map((p, i) => plannedCard(p, i + 1, freeNum)).join("")}</div>`
+      : `<p class="tiny faint" style="margin:0">No games staged. Tap “Add next game”, then drag players from the queue into the slots (or use the ＋ menu, or Auto-fill).</p>`}
+  </div>`;
+
   // Queue
   html += `<div class="card pad stack">
     <div class="row spread wrap">
-      <div class="eyebrow">Up next · <span id="queueCount">${S.queue.length}</span> waiting</div>
+      <div class="eyebrow">In the queue · <span id="queueCount">${S.queue.length}</span> waiting</div>
       <button class="btn ghost sm" id="newSession">New session</button>
     </div>
     <p class="tiny muted" style="margin:0">Top of the queue plays next. Drag <b>⠿</b> to reorder · <b>⤓</b> skip to the back · <b>Rest</b> to sit out · <b>×</b> to remove.</p>
@@ -258,6 +335,35 @@ function editCourtCard(court, A, B) {
     <div class="court-foot"><p class="tiny faint" style="margin:0">Pick a waiting player to swap someone in. The player you replace goes to the back of the queue.${waiting.length ? "" : " (No one is waiting to swap in.)"}</p></div>
   </div>`;
 }
+function plannedCard(plan, n, freeNum) {
+  const slotCell = (team, idx) => {
+    const pid = plan[team][idx];
+    if (pid) {
+      const p = byId(pid);
+      return `<div class="pslot filled"><span class="pslotname">${esc(p.name)}</span><span class="pslotlv num">${p.rating.toFixed(2)}</span>` +
+        `<button class="pslotx" data-unslot="${plan.id}:${team}:${idx}" title="Remove">×</button></div>`;
+    }
+    const opts = `<option value="">＋ add</option>` +
+      S.queue.map(id => { const q = byId(id); return `<option value="${id}">${esc(q.name)} (${q.rating.toFixed(2)})</option>`; }).join("");
+    return `<div class="pslot empty" data-plan="${plan.id}" data-team="${team}" data-idx="${idx}">` +
+      `<select class="slotsel" data-plan="${plan.id}" data-team="${team}" data-idx="${idx}">${opts}</select></div>`;
+  };
+  const filledCount = [...plan.teamA, ...plan.teamB].filter(Boolean).length;
+  const ready = filledCount === 4;
+  let foot;
+  if (ready && freeNum) foot = `<button class="btn cta sm" data-startplan="${plan.id}" data-num="${freeNum}">Start on Court ${freeNum} →</button>`;
+  else if (ready) foot = `<span class="tiny" style="color:var(--good);font-weight:700">Ready · starts when a court opens</span>`;
+  else foot = `<button class="btn sm" data-autofill="${plan.id}" ${S.queue.length < (4 - filledCount) ? "disabled" : ""}>Auto-fill ${4 - filledCount} from queue</button>`;
+  return `<div class="court plan" data-plan="${plan.id}">
+    <div class="court-hd"><span class="cn">Up next ${n}</span>
+      ${filledCount ? `<button class="editbtn" data-clearplan="${plan.id}">Clear</button>` : ""}
+      <button class="editbtn plan-x" data-removeplan="${plan.id}" title="Remove this game">×</button></div>
+    <div class="team"><div class="teamtag">Team 1</div>${slotCell("teamA", 0)}${slotCell("teamA", 1)}</div>
+    <div class="vs">VS</div>
+    <div class="team b"><div class="teamtag">Team 2</div>${slotCell("teamB", 0)}${slotCell("teamB", 1)}</div>
+    <div class="court-foot">${foot}</div>
+  </div>`;
+}
 function freeCourtCard(num) {
   return `<div class="court free">
     <div class="court-hd"><span class="cn">Court ${num}</span><span class="cavg">open</span></div>
@@ -305,41 +411,60 @@ function renderQueue() {
         <button class="qbtn qx" data-rm="${id}" title="Remove / left for the night">×</button>
       </span></li>`;
   }).join("");
-  enableDragReorder(list);
+  enableDrag(list);
 }
-function enableDragReorder(list) {
-  list.querySelectorAll(".qhandle").forEach(h => {
-    h.addEventListener("pointerdown", e => {
-      e.preventDefault();
-      const dragEl = h.closest(".qrow");
-      dragEl.classList.add("dragging");
-      h.setPointerCapture(e.pointerId);
-      const move = ev => {
-        const vh = window.innerHeight;
-        if (ev.clientY < 70) window.scrollBy(0, -10);
-        else if (ev.clientY > vh - 70) window.scrollBy(0, 10);
-        let before = null;
-        for (const r of list.querySelectorAll(".qrow:not(.dragging)")) {
-          const b = r.getBoundingClientRect();
-          if (ev.clientY < b.top + b.height / 2) { before = r; break; }
-        }
-        if (before) list.insertBefore(dragEl, before); else list.appendChild(dragEl);
-      };
-      const up = () => {
-        h.removeEventListener("pointermove", move);
-        h.removeEventListener("pointerup", up);
-        dragEl.classList.remove("dragging");
-        S.queue = [...list.querySelectorAll(".qrow")].map(li => li.dataset.id);
-        save(); refreshLists();
-      };
-      h.addEventListener("pointermove", move);
-      h.addEventListener("pointerup", up);
-    });
-  });
+function enableDrag(list) {
+  list.querySelectorAll(".qhandle").forEach(h => h.addEventListener("pointerdown", e => startDrag(e, h)));
+}
+function startDrag(e, handle) {
+  e.preventDefault();
+  const row = handle.closest(".qrow");
+  const id = row.dataset.id;
+  row.classList.add("dragsrc");
+  const ghost = document.createElement("div");
+  ghost.className = "dragghost";
+  ghost.textContent = byId(id).name;
+  document.body.appendChild(ghost);
+  moveGhost(ghost, e);
+  handle.setPointerCapture(e.pointerId);
+  const onMove = ev => {
+    moveGhost(ghost, ev);
+    const vh = window.innerHeight;
+    if (ev.clientY < 70) window.scrollBy(0, -12);
+    else if (ev.clientY > vh - 70) window.scrollBy(0, 12);
+    document.querySelectorAll(".pslot.over").forEach(s => s.classList.remove("over"));
+    const slot = slotUnder(ev);
+    if (slot) slot.classList.add("over");
+  };
+  const onUp = ev => {
+    handle.removeEventListener("pointermove", onMove);
+    handle.removeEventListener("pointerup", onUp);
+    ghost.remove();
+    row.classList.remove("dragsrc");
+    document.querySelectorAll(".pslot.over").forEach(s => s.classList.remove("over"));
+    const slot = slotUnder(ev);
+    if (slot) { assignToSlot(id, slot.dataset.plan, slot.dataset.team, parseInt(slot.dataset.idx, 10)); return; }
+    const l = document.getElementById("queueList");
+    if (l) {
+      const rows = [...l.querySelectorAll(".qrow")].filter(r => r.dataset.id !== id);
+      let idx = rows.length;
+      for (let k = 0; k < rows.length; k++) { const b = rows[k].getBoundingClientRect(); if (ev.clientY < b.top + b.height / 2) { idx = k; break; } }
+      const cur = S.queue.indexOf(id);
+      if (cur >= 0) { S.queue.splice(cur, 1); S.queue.splice(idx, 0, id); save(); refreshLists(); }
+    }
+  };
+  handle.addEventListener("pointermove", onMove);
+  handle.addEventListener("pointerup", onUp);
+}
+function moveGhost(g, ev) { g.style.left = ev.clientX + "px"; g.style.top = ev.clientY + "px"; }
+function slotUnder(ev) {
+  const el = document.elementFromPoint(ev.clientX, ev.clientY);
+  return el && el.closest ? el.closest(".pslot.empty") : null;
 }
 function statusOf(id) {
   const c = S.active.find(c => c.teamA.includes(id) || c.teamB.includes(id));
   if (c) return { label: `Court ${c.num}`, kind: "playing" };
+  if (S.planned.some(p => p.teamA.includes(id) || p.teamB.includes(id))) return { label: "Up next", kind: "upnext" };
   const qi = S.queue.indexOf(id);
   if (qi >= 0) return { label: `Waiting #${qi + 1}`, kind: "waiting" };
   if (S.resting.includes(id)) return { label: "Resting", kind: "resting" };
@@ -615,6 +740,14 @@ function wireTonight() {
   el.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => { editCourt = b.dataset.edit; renderTonight(); }));
   el.querySelectorAll("[data-donedit]").forEach(b => b.addEventListener("click", () => { editCourt = null; renderTonight(); }));
   el.querySelectorAll(".swapsel").forEach(s => s.addEventListener("change", () => swapCourtPlayer(s.dataset.court, s.dataset.team, parseInt(s.dataset.idx, 10), s.value)));
+  // staged "up next"
+  q("#addPlan") && q("#addPlan").addEventListener("click", addPlan);
+  el.querySelectorAll("[data-autofill]").forEach(b => b.addEventListener("click", () => autofillPlan(b.dataset.autofill)));
+  el.querySelectorAll("[data-clearplan]").forEach(b => b.addEventListener("click", () => clearPlan(b.dataset.clearplan)));
+  el.querySelectorAll("[data-removeplan]").forEach(b => b.addEventListener("click", () => removePlan(b.dataset.removeplan)));
+  el.querySelectorAll("[data-unslot]").forEach(b => b.addEventListener("click", () => { const [pid, team, idx] = b.dataset.unslot.split(":"); unslot(pid, team, parseInt(idx, 10)); }));
+  el.querySelectorAll("[data-startplan]").forEach(b => b.addEventListener("click", () => { if (startPlanned(b.dataset.startplan, parseInt(b.dataset.num, 10))) { save(); renderTonight(); } }));
+  el.querySelectorAll(".slotsel").forEach(s => s.addEventListener("change", () => { if (s.value) assignToSlot(s.value, s.dataset.plan, s.dataset.team, parseInt(s.dataset.idx, 10)); }));
   refreshLists(); updateSearch();
 }
 let flashT = null;
