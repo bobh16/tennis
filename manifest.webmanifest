@@ -1,0 +1,14 @@
+{
+  "name": "Court Sense",
+  "short_name": "Court Sense",
+  "description": "Tennis open-play matchmaking, scoring and ratings — works offline at the court.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e120d",
+  "theme_color": "#234f3a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

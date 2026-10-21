@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Court Sense</title>
+  <meta name="description" content="Tennis open-play matchmaking, scoring and ratings — works offline at the court.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="theme-color" content="#234f3a" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e120d" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Court Sense">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800;900&family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app">
+    <div class="hwrap">
+      <div class="brand">
+        <span class="ball" aria-hidden="true"></span>
+        <div>
+          <h1>Court Sense</h1>
+          <div class="sub">Open-play matchmaking</div>
+        </div>
+      </div>
+      <div class="courts-ctl">
+        <label for="courtTop">Courts</label>
+        <select id="courtTop" aria-label="Number of courts">
+          <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
+        </select>
+      </div>
+      <button class="theme-btn" id="themeBtn" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
+    </div>
+  </header>
+
+  <nav class="tabs"><div class="twrap" role="tablist">
+    <button class="tab" role="tab" data-view="tonight" aria-selected="true">Tonight</button>
+    <button class="tab" role="tab" data-view="players" aria-selected="false">Players</button>
+    <button class="tab" role="tab" data-view="how" aria-selected="false">How it works</button>
+  </div></nav>
+
+  <main>
+    <section id="view-tonight" class="stack"></section>
+    <section id="view-players" class="stack" hidden></section>
+    <section id="view-how" class="stack" hidden></section>
+  </main>
+
+  <div class="foot">Court Sense · runs offline on this device · Phase 1 (organizer tool)</div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
