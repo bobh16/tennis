@@ -89,7 +89,7 @@ function moveQueue(id, dir) {
   const i = S.queue.indexOf(id), j = i + dir;
   if (i < 0 || j < 0 || j >= S.queue.length) return;
   [S.queue[i], S.queue[j]] = [S.queue[j], S.queue[i]];
-  save(); renderQueue();
+  save(); refreshLists();
 }
 function startOne(num) {
   const ids = pickFoursome(S.queue, byId, QUEUE_WINDOW);
@@ -178,6 +178,18 @@ function renderTonight() {
     <ol class="queue" id="queueList"></ol>
   </div>`;
 
+  // Everyone here today
+  html += `<div class="card pad stack">
+    <div class="row spread wrap">
+      <div class="eyebrow">Tonight's players · <span id="todayCount">${present().length}</span></div>
+      <div class="tiny muted" id="todayMeta"></div>
+    </div>
+    <div class="tablewrap"><table class="today">
+      <thead><tr><th>Player</th><th class="r">Level</th><th class="r">Games</th><th>Status</th></tr></thead>
+      <tbody id="todayBody"></tbody>
+    </table></div>
+  </div>`;
+
   el.innerHTML = html;
   wireTonight();
 }
@@ -197,7 +209,7 @@ function activeCourtCard(court) {
       <div class="scol"><span class="slbl">Team 2</span>${stepper(court.id, "B", court.scoreB)}</div>
     </div>
     <div class="score-cap">Games won · race to 6 (sudden death at 5–5)</div>
-    <div class="court-foot"><button class="btn primary finishbtn" data-finish="${court.id}">Match finished ✓</button></div>
+    <div class="court-foot"><button class="btn cta finishbtn" data-finish="${court.id}">Match finished ✓</button></div>
   </div>`;
 }
 function freeCourtCard(num) {
@@ -247,6 +259,29 @@ function renderQueue() {
       </span></li>`;
   }).join("");
 }
+function statusOf(id) {
+  const c = S.active.find(c => c.teamA.includes(id) || c.teamB.includes(id));
+  if (c) return { label: `Court ${c.num}`, kind: "playing" };
+  const qi = S.queue.indexOf(id);
+  if (qi >= 0) return { label: `Waiting #${qi + 1}`, kind: "waiting" };
+  return { label: "—", kind: "idle" };
+}
+function renderToday() {
+  const pres = present();
+  const cnt = document.getElementById("todayCount"); if (cnt) cnt.textContent = pres.length;
+  const meta = document.getElementById("todayMeta");
+  if (meta) meta.textContent = `${S.active.length * 4} on court · ${S.queue.length} waiting`;
+  const body = document.getElementById("todayBody"); if (!body) return;
+  if (!pres.length) { body.innerHTML = `<tr><td colspan="4" class="faint tiny">No one added yet.</td></tr>`; return; }
+  body.innerHTML = [...pres].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0).map(p => {
+    const s = statusOf(p.id);
+    return `<tr><td><b>${esc(p.name)}</b></td>` +
+      `<td class="r"><span class="level">${p.rating.toFixed(2)}</span></td>` +
+      `<td class="r num">${p.gamesTonight || 0}</td>` +
+      `<td><span class="stat ${s.kind}">${s.label}</span></td></tr>`;
+  }).join("");
+}
+function refreshLists() { renderQueue(); renderToday(); }
 
 /* ---------- search / add ---------- */
 function updateSearch() {
@@ -268,7 +303,7 @@ function addNewPerson(name) {
   const p = makePlayer(name, 3.5);
   S.players.push(p); addToList(p); save();
   const box = document.getElementById("searchBox"); if (box) box.value = "";
-  renderQueue(); updateSearch(); renderPlayers();
+  refreshLists(); updateSearch(); renderPlayers();
 }
 
 /* ---------- Players ---------- */
@@ -483,7 +518,7 @@ function wireTonight() {
     sb.addEventListener("input", updateSearch);
     q("#searchResults").addEventListener("click", e => {
       const add = e.target.closest("[data-add]");
-      if (add) { addToList(byId(add.dataset.add)); save(); renderQueue(); updateSearch(); return; }
+      if (add) { addToList(byId(add.dataset.add)); save(); refreshLists(); updateSearch(); return; }
       const np = e.target.closest("[data-newname]");
       if (np) addNewPerson(np.dataset.newname);
     });
@@ -492,9 +527,9 @@ function wireTonight() {
   if (ql) ql.addEventListener("click", e => {
     const up = e.target.closest("[data-up]"); if (up) { moveQueue(up.dataset.up, -1); return; }
     const dn = e.target.closest("[data-down]"); if (dn) { moveQueue(dn.dataset.down, 1); return; }
-    const rm = e.target.closest("[data-rm]"); if (rm) { removeTonight(rm.dataset.rm); renderQueue(); updateSearch(); }
+    const rm = e.target.closest("[data-rm]"); if (rm) { removeTonight(rm.dataset.rm); refreshLists(); updateSearch(); }
   });
-  renderQueue(); updateSearch();
+  refreshLists(); updateSearch();
 }
 let flashT = null;
 function flashBtn(sel, msg) {

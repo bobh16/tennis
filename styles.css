@@ -205,6 +205,13 @@ main{max-width:860px;margin:0 auto;
 .qmove .qx{color:var(--muted);font-size:15px}
 .qmove .qx:hover{color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
 
+/* tonight's players table */
+.today th,.today td{padding:8px 10px}
+.stat{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.stat.playing{background:color-mix(in srgb,var(--court) 18%,transparent);color:var(--court)}
+.stat.waiting{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.stat.idle{background:var(--surface-2);color:var(--faint)}
+
 .banner{display:flex;gap:10px;align-items:flex-start;background:color-mix(in srgb,var(--accent) 14%,var(--surface));
   border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));border-radius:12px;padding:12px 14px}
 .banner .em{font-weight:700}
