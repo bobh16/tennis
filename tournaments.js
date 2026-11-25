@@ -97,23 +97,25 @@ export function createTournaments(ctx) {
   // Rotate divisions across the shared court pool: each turn, one division fills
   // the courts with its next matches (no shared team in a block), then rests while
   // the next division plays. Returns timed blocks for the day.
-  function buildDaySchedule(t, day) {
-    const courts = Math.max(1, t.courts || 1);
+  // The day's divisions in the rotation order the organiser set (rotOrder),
+  // falling back to call time then grade.
+  function orderedDivsForDay(t, day) {
     const divs = divisionsForDay(t, day).filter(d => d.matches.some(m => m.a && m.b));
-    // division that calls earliest rotates first; then by grade order, then as listed
-    divs.sort((a, b) => {
+    return divs.sort((a, b) => {
+      if (a.rotOrder != null || b.rotOrder != null) return (a.rotOrder == null ? 1e9 : a.rotOrder) - (b.rotOrder == null ? 1e9 : b.rotOrder);
       const ca = a.callTime ? Date.parse(`${day}T${a.callTime}:00`) : Infinity;
       const cb = b.callTime ? Date.parse(`${day}T${b.callTime}:00`) : Infinity;
       return (ca - cb) || (GRADES.indexOf(a.grade) - GRADES.indexOf(b.grade));
     });
+  }
+  function buildDaySchedule(t, day) {
+    const courts = Math.max(1, t.courts || 1);
+    const alternate = t.alternate !== false; // default on
+    const divs = orderedDivsForDay(t, day);
     const queues = divs.map(d => ({ d, ms: [...d.matches].filter(m => m.a && m.b && m.endedAt == null).sort((x, y) => ordKey(x) - ordKey(y)) }));
     const blocks = [];
-    let di = 0, guard = 0;
-    const anyLeft = () => queues.some(q => q.ms.length);
-    while (anyLeft() && guard++ < 999) {
-      let q = null, scanned = 0;
-      while (scanned < queues.length) { const c = queues[di % queues.length]; di++; scanned++; if (c.ms.length) { q = c; break; } }
-      if (!q) break;
+    // take up to `courts` matches from one division's queue, no team twice in a block
+    const fillBlock = q => {
       const block = { div: q.d, slots: [] }, used = new Set();
       while (block.slots.length < courts && q.ms.length) {
         const idx = q.ms.findIndex(m => !used.has(m.a) && !used.has(m.b));
@@ -122,7 +124,23 @@ export function createTournaments(ctx) {
         used.add(m.a); used.add(m.b);
         block.slots.push({ m, court: block.slots.length + 1 });
       }
-      if (block.slots.length) blocks.push(block);
+      return block.slots.length ? block : null;
+    };
+    const anyLeft = () => queues.some(q => q.ms.length);
+    let guard = 0;
+    if (alternate) {
+      // one division fills the courts, then yields to the next; cycle round
+      let di = 0;
+      while (anyLeft() && guard++ < 999) {
+        let q = null, scanned = 0;
+        while (scanned < queues.length) { const c = queues[di % queues.length]; di++; scanned++; if (c.ms.length) { q = c; break; } }
+        if (!q) break;
+        const block = fillBlock(q);
+        if (block) blocks.push(block);
+      }
+    } else {
+      // each division plays all its matches before the next division starts
+      queues.forEach(q => { while (q.ms.length && guard++ < 999) { const block = fillBlock(q); if (!block) break; blocks.push(block); } });
     }
     // lay blocks on the clock: a started block anchors to its real start; otherwise
     // it follows the previous block; a fully-finished block advances by real end.
@@ -243,15 +261,40 @@ export function createTournaments(ctx) {
     if (!days.length) return "";
     const today = todayISO();
     days.sort((a, b) => ((a === today ? 0 : 1) - (b === today ? 0 : 1)) || (a < b ? -1 : 1));
+    const alternate = t.alternate !== false;
     let h = `<div class="card pad stack">
       <div class="eyebrow">Schedule · shared courts</div>
-      <p class="tiny muted" style="margin:0">Divisions take turns on the ${t.courts} court${t.courts > 1 ? "s" : ""}: one fills the courts, then rests while the next plays. Times run from each division's call time and the average match length. Start / Finish a match to move the clock.</p>`;
+      <div class="row wrap" style="gap:14px;align-items:center">
+        <label class="divday-lbl tiny muted" title="How many courts are in use">Courts
+          <select class="divday" id="sch_courts">${[1,2,3,4,5,6,7,8].map(n => `<option ${n === t.courts ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label class="altcheck tiny" title="Rotate divisions so each rests between its matches">
+          <input type="checkbox" id="sch_alt" ${alternate ? "checked" : ""}> Alternate divisions on the courts</label>
+      </div>
+      <p class="tiny muted" style="margin:0">${alternate
+        ? `Divisions take turns on the ${t.courts} court${t.courts > 1 ? "s" : ""}: one fills the courts, then rests while the next plays. Drag the order below.`
+        : `Each division plays all its matches, then the next division starts. Times run from call times and average match length.`}</p>`;
     days.forEach(day => {
       const blocks = buildDaySchedule(t, day);
       const isToday = day === today;
+      const dayDivs = orderedDivsForDay(t, day);
       h += `<div class="schedday"><div class="row spread" style="align-items:center">
         <div class="schedday-h">${weekdayOf(day)}, ${fmtDate(day)}${isToday ? ` <span class="todaytag">Today</span>` : ""}</div>
         <div class="tiny faint">${blocks.length} round${blocks.length !== 1 ? "s" : ""}</div></div>`;
+      if (alternate && dayDivs.length > 1) {
+        h += `<div class="rotq"><div class="tiny muted" style="font-weight:700;margin-bottom:4px">Rotation order</div>`;
+        dayDivs.forEach((d, i) => {
+          h += `<div class="rotq-row">
+            <span class="morder">
+              <button class="iconbtn" data-rotmove="${day}:${d.id}:up" title="Earlier" ${i === 0 ? "disabled" : ""}>↑</button>
+              <span class="onum num">${i + 1}</span>
+              <button class="iconbtn" data-rotmove="${day}:${d.id}:down" title="Later" ${i === dayDivs.length - 1 ? "disabled" : ""}>↓</button>
+            </span>
+            <span class="grow" style="font-weight:600;font-size:13px">${divLabel(d)}</span>
+            ${d.callTime ? `<span class="tiny faint">call ${fmtClock(Date.parse(`${day}T${d.callTime}:00`))}</span>` : ""}
+          </div>`;
+        });
+        h += `</div>`;
+      }
       if (!blocks.length) h += `<p class="tiny faint" style="margin:4px 0 0">All matches finished.</p>`;
       blocks.forEach((b, i) => {
         h += `<div class="schedblock">
@@ -747,6 +790,24 @@ export function createTournaments(ctx) {
     const d = findDiv(divId); if (!d) return;
     d.callTime = val || null; ctx.save(); render();
   }
+  function setCourts(n) {
+    const t = findT(openId); if (!t) return;
+    t.courts = Math.max(1, Math.min(8, parseInt(n, 10) || 1)); ctx.save(); render();
+  }
+  function setAlternate(on) {
+    const t = findT(openId); if (!t) return;
+    t.alternate = !!on; ctx.save(); render();
+  }
+  function moveRotation(day, divId, dir) {
+    const t = findT(openId); if (!t) return;
+    const ordered = orderedDivsForDay(t, day);
+    ordered.forEach((d, i) => { d.rotOrder = i; }); // normalise to current order
+    const i = ordered.findIndex(d => d.id === divId);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= ordered.length) return;
+    const tmp = ordered[i].rotOrder; ordered[i].rotOrder = ordered[j].rotOrder; ordered[j].rotOrder = tmp;
+    ctx.save(); render();
+  }
   function shuffleOrder(divId) {
     const d = findDiv(divId); if (!d) return;
     balancedOrder([...d.matches].sort((a, b) => ordKey(a) - ordKey(b)));
@@ -792,6 +853,9 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-court]").forEach(sel => sel.addEventListener("change", () => { const [did, mid] = sel.dataset.court.split(":"); setCourt(did, mid, sel.value); }));
     el.querySelectorAll("[data-slottime]").forEach(inp => inp.addEventListener("change", () => { const [did, mid] = inp.dataset.slottime.split(":"); setSlotTime(did, mid, inp.value); }));
     el.querySelectorAll("[data-ttab]").forEach(b => b.addEventListener("click", () => { detailTab = b.dataset.ttab; render(); }));
+    const sc = q("#sch_courts"); if (sc) sc.addEventListener("change", () => setCourts(sc.value));
+    const sa = q("#sch_alt"); if (sa) sa.addEventListener("change", () => setAlternate(sa.checked));
+    el.querySelectorAll("[data-rotmove]").forEach(b => b.addEventListener("click", () => { const [day, did, dir] = b.dataset.rotmove.split(":"); moveRotation(day, did, dir); }));
     el.querySelectorAll("[data-startmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid, court] = b.dataset.startmatch.split(":"); startStamp(did, mid, court); }));
     el.querySelectorAll("[data-mscore]").forEach(b => b.addEventListener("click", () => { const [did, mid, side, dir] = b.dataset.mscore.split(":"); stepScore(did, mid, side, dir); }));
     el.querySelectorAll("[data-finishmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.finishmatch.split(":"); finishStamp(did, mid); }));

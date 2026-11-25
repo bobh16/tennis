@@ -376,6 +376,11 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .sbtn{width:46px;height:46px;border-radius:12px;border:1px solid var(--border);background:var(--surface-2);
   font-size:24px;line-height:1;cursor:pointer;color:var(--ink)}
 .sbtn:active{background:var(--court);color:#fff}
+.altcheck{display:inline-flex;align-items:center;gap:7px;font-weight:700;cursor:pointer}
+.altcheck input{width:17px;height:17px;accent-color:var(--court)}
+.rotq{border:1px solid var(--border);border-radius:10px;padding:8px;background:var(--surface-2);margin-top:4px}
+.rotq-row{display:flex;align-items:center;gap:8px;padding:5px 2px}
+.rotq-row+.rotq-row{border-top:1px solid var(--border)}
 
 /* home dashboard + section sub-nav */
 nav.subnav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 58px);z-index:25;background:var(--court);box-shadow:var(--shadow)}
