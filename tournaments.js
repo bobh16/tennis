@@ -55,7 +55,7 @@ export function createTournaments(ctx) {
     d.matches.filter(m => m.startedAt != null && m.endedAt == null && m.a && m.b)
       .forEach((m, i) => { if (i < courts) free[i] = Math.max(free[i], m.startedAt + avg); });
     const pending = d.matches.filter(m => m.a && m.b && m.startedAt == null && m.endedAt == null)
-      .sort((x, y) => ((slotMs(x, d) || 0) - (slotMs(y, d) || 0)) || (x.round - y.round) || (x.slot - y.slot));
+      .sort((x, y) => (x.round - y.round) || (ordKey(x) - ordKey(y)) || (x.slot - y.slot));
     const pred = new Map();
     pending.forEach(m => {
       let ci = 0; for (let i = 1; i < courts; i++) if (free[i] < free[ci]) ci = i;
@@ -174,16 +174,20 @@ export function createTournaments(ctx) {
   }
   function divisionHtml(t, d) {
     const day = dayOf(d);
+    const callTxt = d.callTime ? ` · call ${fmtClock(Date.parse(`${day}T${d.callTime}:00`))}` : "";
     let h = `<div class="card pad" data-div="${d.id}">
       <div class="row spread" style="align-items:flex-start;gap:8px">
         <div><div class="divtitle">${divLabel(d)}</div>
-          <div class="tiny muted">${d.teams.length} ${teamSize(d) === 1 ? "player" : "team"}${d.teams.length !== 1 ? "s" : ""} · ${weekdayOf(day)}</div></div>
+          <div class="tiny muted">${d.teams.length} ${teamSize(d) === 1 ? "player" : "team"}${d.teams.length !== 1 ? "s" : ""} · ${weekdayOf(day)}${callTxt}</div></div>
         <div class="row" style="gap:6px;align-items:center;flex:none">
           <label class="divday-lbl tiny muted" title="Day this division plays">${weekdayOf(day).slice(0,3)}
             <input type="date" class="divday" data-divday="${d.id}" value="${day}" min="${t.startDate}" max="${t.endDate}"></label>
+          <label class="divday-lbl tiny muted" title="Call time — when everyone in this division should arrive">Call
+            <input type="time" class="divday" data-calltime="${d.id}" value="${d.callTime || ""}"></label>
           <button class="qbtn qx" data-deldiv="${d.id}" title="Remove division">×</button>
         </div>
       </div>`;
+    if (d.callTime) h += `<p class="tiny callnote" style="margin:6px 0 0">Everyone in ${divLabel(d)} should arrive by <b>${fmtClock(Date.parse(`${day}T${d.callTime}:00`))}</b> — the playing order can change, so all players need to be here.</p>`;
     if (d.teams.length) h += `<div class="stack" style="gap:6px;margin-top:10px">` + d.teams.map((tm, i) => teamRow(d, tm, i)).join("") + `</div>`;
     h += teamBuilderHtml(d);
     h += matchesSectionHtml(t, d);
@@ -200,8 +204,32 @@ export function createTournaments(ctx) {
     const ms = [];
     for (let i = 0; i < teams.length; i++)
       for (let j = i + 1; j < teams.length; j++)
-        ms.push({ id: uid("m"), round: 1, slot: ms.length, a: teams[i].id, b: teams[j].id, scoreA: null, scoreB: null, done: false, winner: null });
-    return ms;
+        ms.push({ id: uid("m"), round: 1, slot: ms.length, ord: ms.length, a: teams[i].id, b: teams[j].id, scoreA: null, scoreB: null, done: false, winner: null });
+    return balancedOrder(ms); // start spaced out, not in raw A-vs-B order
+  }
+  const ordKey = (m, i) => (m.ord != null ? m.ord : (m.slot != null ? m.slot : i));
+  // Reorder matches so each team rests between its games as much as possible.
+  // Greedy: next match is the one whose more-recently-played team rested longest;
+  // random tiebreak keeps the draw fresh. Reassigns ord to the new positions.
+  function balancedOrder(matches) {
+    const remaining = matches.slice(), out = [], lastPos = {};
+    while (remaining.length) {
+      let best = [], bestScore = -1;
+      remaining.forEach(m => {
+        const la = lastPos[m.a] == null ? -999 : lastPos[m.a];
+        const lb = lastPos[m.b] == null ? -999 : lastPos[m.b];
+        const score = Math.min(out.length - la, out.length - lb); // bigger = both rested longer
+        if (score > bestScore) { bestScore = score; best = [m]; }
+        else if (score === bestScore) best.push(m);
+      });
+      const pick = best[Math.floor(Math.random() * best.length)];
+      out.push(pick);
+      if (pick.a) lastPos[pick.a] = out.length - 1;
+      if (pick.b) lastPos[pick.b] = out.length - 1;
+      remaining.splice(remaining.indexOf(pick), 1);
+    }
+    out.forEach((m, i) => { m.ord = i; });
+    return out;
   }
   function seedOrder(size) {
     let seeds = [1, 2];
@@ -266,14 +294,20 @@ export function createTournaments(ctx) {
     if (r === total - 2) return "Quarterfinals";
     return "Round " + r;
   }
-  function matchRow(d, m, t, pred) {
+  function matchRow(d, m, t, pred, ord) {
     const scorable = m.a && m.b;
     const aName = m.a ? teamName(d, m.a) : (m.b ? "(bye)" : "TBD");
     const bName = m.b ? teamName(d, m.b) : (m.a ? "(bye)" : "TBD");
     const sa = m.scoreA == null ? "" : m.scoreA, sb = m.scoreB == null ? "" : m.scoreB;
     const aw = m.done && m.scoreA > m.scoreB, bw = m.done && m.scoreB > m.scoreA;
     const inp = side => `<input class="msc" type="number" min="0" max="99" inputmode="numeric" data-score="${d.id}:${m.id}:${side}" value="${side === "A" ? sa : sb}">`;
+    const orderCtrl = ord ? `<span class="morder">
+      <button class="iconbtn oup" data-movematch="${d.id}:${m.id}:up" title="Play earlier" ${ord.pos === 0 ? "disabled" : ""}>↑</button>
+      <span class="onum num">${ord.pos + 1}</span>
+      <button class="iconbtn odn" data-movematch="${d.id}:${m.id}:down" title="Play later" ${ord.pos === ord.count - 1 ? "disabled" : ""}>↓</button>
+    </span>` : "";
     return `<div class="mrow ${m.done ? "done" : ""}">
+      ${orderCtrl}
       <span class="mt ${aw ? "win" : ""}">${aName}</span>
       ${scorable ? inp("A") : `<span class="faint mono">–</span>`}
       <span class="faint mono">–</span>
@@ -336,10 +370,14 @@ export function createTournaments(ctx) {
     }
     if (t.type === "elimination") return bracketHtml(t, d);
     const pred = predictSchedule(t, d);
-    let h = `<div class="eyebrow" style="margin-top:14px;margin-bottom:6px">Matches</div>`;
+    const ordered = [...d.matches].sort((a, b) => ordKey(a) - ordKey(b));
+    let h = `<div class="row spread wrap" style="align-items:center;gap:8px;margin-top:14px;margin-bottom:6px">
+      <div class="eyebrow" style="margin:0">Match order</div>
+      <button class="btn sm" data-shuffle="${d.id}">⤨ Shuffle (balanced rest)</button></div>`;
+    h += `<p class="tiny muted" style="margin:0 0 8px">Order decides who plays first. Shuffle spaces each team's games out so no one plays back-to-back; or set it by hand with the ↑ ↓ arrows.</p>`;
     h += nextUpLine(d, pred);
     h += `<div class="stack" style="gap:6px">`;
-    h += d.matches.map(m => matchRow(d, m, t, pred)).join("");
+    h += ordered.map((m, i) => matchRow(d, m, t, pred, { pos: i, count: ordered.length })).join("");
     h += `</div><button class="btn ghost sm" data-regen="${d.id}" style="margin-top:8px">Regenerate</button>`;
     h += standingsHtml(d);
     return h;
@@ -497,6 +535,24 @@ export function createTournaments(ctx) {
     const m = findMatch(divId, matchId); if (!m) return;
     m.startedAt = null; m.endedAt = null; ctx.save(); render();
   }
+  function setCallTime(divId, val) {
+    const d = findDiv(divId); if (!d) return;
+    d.callTime = val || null; ctx.save(); render();
+  }
+  function shuffleOrder(divId) {
+    const d = findDiv(divId); if (!d) return;
+    balancedOrder([...d.matches].sort((a, b) => ordKey(a) - ordKey(b)));
+    ctx.save(); render();
+  }
+  function moveMatch(divId, matchId, dir) {
+    const d = findDiv(divId); if (!d) return;
+    const ordered = [...d.matches].sort((a, b) => ordKey(a) - ordKey(b));
+    const i = ordered.findIndex(m => m.id === matchId);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= ordered.length) return;
+    const tmp = ordered[i].ord; ordered[i].ord = ordered[j].ord; ordered[j].ord = tmp;
+    ctx.save(); render();
+  }
 
   /* ---------- wiring ---------- */
   function wire() {
@@ -530,6 +586,9 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-startmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.startmatch.split(":"); startStamp(did, mid); }));
     el.querySelectorAll("[data-finishmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.finishmatch.split(":"); finishStamp(did, mid); }));
     el.querySelectorAll("[data-resettime]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.resettime.split(":"); resetStamp(did, mid); }));
+    el.querySelectorAll("[data-calltime]").forEach(inp => inp.addEventListener("change", () => setCallTime(inp.dataset.calltime, inp.value)));
+    el.querySelectorAll("[data-shuffle]").forEach(b => b.addEventListener("click", () => shuffleOrder(b.dataset.shuffle)));
+    el.querySelectorAll("[data-movematch]").forEach(b => b.addEventListener("click", () => { const [did, mid, dir] = b.dataset.movematch.split(":"); moveMatch(did, mid, dir); }));
     const sb = q("#tb_search");
     if (sb) {
       sb.addEventListener("input", updateBuildResults);
