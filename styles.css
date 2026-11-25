@@ -317,6 +317,9 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
   font-size:10px;font-weight:800;flex:none}
 .gchip.f{background:color-mix(in srgb,#c0559c 20%,transparent);color:#b4458e}
 .gchip.m{background:color-mix(in srgb,#2f74d0 18%,transparent);color:#2f74d0}
+.prow{cursor:pointer}
+.prow:hover td{background:color-mix(in srgb,var(--court) 6%,transparent)}
+.prow:focus-visible{outline:2px solid var(--court);outline-offset:-2px}
 .sres.hl{border-color:var(--court);background:color-mix(in srgb,var(--court) 8%,var(--surface))}
 
 /* tournament matches */

@@ -123,7 +123,7 @@ export function makePlayer(name, rating = 3.5, gender = null) {
   const r = Math.max(1.5, Math.min(6, rating));
   return {
     id: "p" + Date.now().toString(36) + "-" + idCounter.toString(36),
-    name: name.trim(), rating: Math.round(r * 100) / 100, gender, reliability: 0,
+    name: name.trim(), rating: Math.round(r * 100) / 100, gender, age: null, ageGroup: "adult", reliability: 0,
     games: 0, wins: 0, losses: 0, present: false, arr: 0, gamesTonight: 0, lastRound: -99, delta: 0,
   };
 }

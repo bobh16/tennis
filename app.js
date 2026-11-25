@@ -531,10 +531,7 @@ function renderPlayers() {
     wireOnboarding(el); wireImport(el);
     return;
   }
-  const f = S.playerFilter;
   let list = [...S.players];
-  if (f === "present") list = list.filter(p => p.present);
-  if (f === "prov") list = list.filter(p => p.reliability < 0.4);
   const { key, dir } = S.playersSort;
   list.sort((a, b) => {
     if (key === "name") return a.name < b.name ? -dir : a.name > b.name ? dir : 0;
@@ -547,13 +544,9 @@ function renderPlayers() {
   const th = (k, label, r) => `<th class="${r ? "r " : ""}${key === k ? "sorted" : ""}" data-sort="${k}">${label}${key === k ? (dir < 0 ? " ↓" : " ↑") : ""}</th>`;
 
   el.innerHTML = `
-    <div><div class="eyebrow">Club roster</div><h2 style="font-size:22px">Players & ratings</h2></div>
+    <div><div class="eyebrow">Club roster</div><h2 style="font-size:22px">Players</h2></div>
     <div class="row spread wrap" style="gap:10px">
-      <div class="seg" role="group" aria-label="filter">
-        <button data-filter="all" aria-pressed="${f === "all"}">All ${S.players.length}</button>
-        <button data-filter="present" aria-pressed="${f === "present"}">Here tonight</button>
-        <button data-filter="prov" aria-pressed="${f === "prov"}">Provisional</button>
-      </div>
+      <span class="tiny muted" style="font-weight:700">${S.players.length} player${S.players.length === 1 ? "" : "s"}</span>
       <div class="row" style="gap:8px;align-items:center">
         <span class="tiny muted" style="font-weight:700">Show as</span>
         <div class="seg" role="group" aria-label="level display">
@@ -562,17 +555,11 @@ function renderPlayers() {
         </div>
       </div>
     </div>
+    <p class="tiny faint" style="margin:0">Tap a player to edit their profile.</p>
     ${importPanelHtml()}
-    <div id="relHelp" class="callout" hidden>
-      <div class="grow"><b>Reliability</b> is how settled a player's level is, based on how many games they've played. New players start low and their level moves quickly; with a long match history it climbs toward 100% and the level barely changes.</div>
-      <button class="x" id="relHelpClose" aria-label="Close">×</button>
-    </div>
     <div class="card"><div class="tablewrap"><table>
       <thead><tr>
-        ${th("name", "Player")}<th>Grade</th>${th("rating", "Level", true)}
-        <th class="r">Reliability <button class="infobtn" id="relInfo" aria-label="About reliability" aria-expanded="false">i</button></th>
-        ${th("record", "W–L", true)}${th("games", "Games", true)}
-        <th class="r">Last move</th>
+        ${th("name", "Player")}<th>Gender</th><th>Grade</th>${th("rating", "Level", true)}<th class="r">Age</th>
       </tr></thead>
       <tbody>${list.map(playerRow).join("")}</tbody>
     </table></div></div>
@@ -583,25 +570,29 @@ function renderPlayers() {
     </div>
     <form class="card pad row wrap" id="addForm" hidden style="gap:10px;align-items:flex-end">
       <label class="field grow">Name<input type="text" id="np_name" placeholder="e.g. Alex M." autocomplete="off"></label>
-      <label class="field">Starting level<input type="number" id="np_lvl" value="3.50" step="0.05" min="1.5" max="6" style="width:112px"></label>
       <label class="field">Gender<select id="np_gender"><option value="">—</option><option value="f">Women</option><option value="m">Men</option></select></label>
+      <label class="field">Starting level<input type="number" id="np_lvl" value="3.50" step="0.05" min="1.5" max="6" style="width:112px"></label>
+      <label class="field">Age<input type="number" id="np_age" placeholder="—" min="4" max="99" style="width:84px"></label>
+      <label class="field">If no age<select id="np_agegrp"><option value="junior">Junior</option><option value="adult" selected>Adult</option><option value="senior">Senior</option></select></label>
       <button class="btn primary" type="submit">Add player</button>
       <button class="btn ghost" type="button" id="np_cancel">Cancel</button>
     </form>`;
   wirePlayers(); wireImport(el);
 }
+function ageGroupLabel(g) { return { junior: "Junior", adult: "Adult", senior: "Senior" }[g] || "Adult"; }
+function ageDisplay(p) { return (p.age != null && p.age !== "") ? p.age : ageGroupLabel(p.ageGroup || "adult"); }
+function genderChip(g) {
+  if (g === "f") return `<span class="gchip f" title="Women">W</span>`;
+  if (g === "m") return `<span class="gchip m" title="Men">M</span>`;
+  return `<span class="gchip" title="Not set">—</span>`;
+}
 function playerRow(p) {
-  const mv = p.delta > 0 ? `<span class="trend up">▲ ${p.delta.toFixed(3)}</span>`
-    : p.delta < 0 ? `<span class="trend down">▼ ${Math.abs(p.delta).toFixed(3)}</span>`
-    : `<span class="trend faint">–</span>`;
-  return `<tr>
+  return `<tr class="prow" data-pid="${p.id}" tabindex="0">
     <td><b>${esc(p.name)}</b>${p.present ? ` <span class="tiny" style="color:var(--court)">• here</span>` : ""}</td>
+    <td>${genderChip(p.gender)}</td>
     <td>${tierChip(p.rating)}</td>
     <td class="r"><span class="level">${p.rating.toFixed(2)}</span></td>
-    <td class="r num">${Math.round(p.reliability * 100)}%</td>
-    <td class="r num">${p.wins}–${p.losses}</td>
-    <td class="r num">${p.games}</td>
-    <td class="r">${mv}</td>
+    <td class="r num">${ageDisplay(p)}</td>
   </tr>`;
 }
 
@@ -877,14 +868,13 @@ function wirePlayers() {
     else S.playersSort = { key: k, dir: k === "name" ? 1 : -1 };
     save(); renderPlayers();
   }));
-  el.querySelectorAll("[data-filter]").forEach(b => b.addEventListener("click", () => { S.playerFilter = b.dataset.filter; save(); renderPlayers(); }));
   el.querySelectorAll("[data-disp]").forEach(b => b.addEventListener("click", () => { S.levelDisplay = b.dataset.disp; save(); renderPlayers(); renderTonight(); }));
 
-  const info = el.querySelector("#relInfo"), help = el.querySelector("#relHelp");
-  if (info && help) {
-    info.addEventListener("click", e => { e.stopPropagation(); const show = help.hidden; help.hidden = !show; info.setAttribute("aria-expanded", String(show)); });
-    el.querySelector("#relHelpClose").addEventListener("click", () => { help.hidden = true; info.setAttribute("aria-expanded", "false"); });
-  }
+  el.querySelectorAll(".prow").forEach(r => {
+    r.addEventListener("click", () => openProfile(r.dataset.pid));
+    r.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProfile(r.dataset.pid); } });
+  });
+
   const addBtn = el.querySelector("#addPlayer"), form = el.querySelector("#addForm");
   addBtn.addEventListener("click", () => { form.hidden = !form.hidden; if (!form.hidden) el.querySelector("#np_name").focus(); });
   el.querySelector("#np_cancel").addEventListener("click", () => { form.hidden = true; });
@@ -893,7 +883,11 @@ function wirePlayers() {
     const name = el.querySelector("#np_name").value.trim();
     if (!name) return;
     const r = parseFloat(el.querySelector("#np_lvl").value) || 3.5;
-    S.players.push(makePlayer(name, r, el.querySelector("#np_gender").value || null));
+    const p = makePlayer(name, r, el.querySelector("#np_gender").value || null);
+    const ageV = el.querySelector("#np_age").value.trim();
+    p.age = ageV === "" ? null : Math.max(4, Math.min(99, parseInt(ageV, 10) || 0));
+    p.ageGroup = el.querySelector("#np_agegrp").value || "adult";
+    S.players.push(p);
     save(); renderPlayers(); renderTonight();
   });
   el.querySelector("#clearAll").addEventListener("click", async () => {
@@ -901,6 +895,67 @@ function wirePlayers() {
     try { await store.clearAll(); } catch (e) {}
     S = { players: [], ...DEFAULTS, pairHist: {}, oppHist: {}, queue: [], active: [], sessionDate: todayISO() };
     render();
+  });
+}
+
+function openProfile(pid) {
+  const p = S.players.find(x => x.id === pid);
+  if (!p) return;
+  const t = tierOf(p.rating);
+  const overlay = document.createElement("div");
+  overlay.className = "modal";
+  overlay.innerHTML = `<div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <div class="row spread" style="align-items:center">
+        <h2 style="font-size:18px">Player profile</h2>
+        <button class="btn ghost sm" data-x>Close</button>
+      </div>
+      <label class="field">Name<input type="text" id="pf_name" value="${esc(p.name)}" autocomplete="off"></label>
+      <div class="row wrap" style="gap:10px">
+        <label class="field">Gender
+          <select id="pf_gender">
+            <option value=""${!p.gender ? " selected" : ""}>—</option>
+            <option value="f"${p.gender === "f" ? " selected" : ""}>Women</option>
+            <option value="m"${p.gender === "m" ? " selected" : ""}>Men</option>
+          </select></label>
+        <label class="field">Level<input type="number" id="pf_lvl" value="${p.rating.toFixed(2)}" step="0.05" min="1.5" max="6" style="width:110px"></label>
+      </div>
+      <div class="row wrap" style="gap:10px;align-items:flex-end">
+        <label class="field">Age<input type="number" id="pf_age" value="${p.age != null ? p.age : ""}" placeholder="—" min="4" max="99" style="width:96px"></label>
+        <label class="field">If no age
+          <select id="pf_agegrp">
+            <option value="junior"${(p.ageGroup || "adult") === "junior" ? " selected" : ""}>Junior</option>
+            <option value="adult"${(p.ageGroup || "adult") === "adult" ? " selected" : ""}>Adult</option>
+            <option value="senior"${(p.ageGroup || "adult") === "senior" ? " selected" : ""}>Senior</option>
+          </select></label>
+        <span class="tiny muted" style="padding-bottom:8px">Grade ${t.cls} · ${t.name}</span>
+      </div>
+      <div class="row spread" style="gap:8px;margin-top:4px">
+        <button class="btn ghost sm" data-remove style="color:var(--bad)">Remove player</button>
+        <button class="btn primary" data-save>Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector("[data-x]").addEventListener("click", close);
+  overlay.querySelector(".modal-backdrop").addEventListener("click", close);
+  overlay.querySelector("[data-save]").addEventListener("click", () => {
+    const name = overlay.querySelector("#pf_name").value.trim();
+    if (name) p.name = name;
+    p.gender = overlay.querySelector("#pf_gender").value || null;
+    const r = parseFloat(overlay.querySelector("#pf_lvl").value);
+    if (isFinite(r)) p.rating = Math.max(1.5, Math.min(6, Math.round(r * 100) / 100));
+    const ageV = overlay.querySelector("#pf_age").value.trim();
+    p.age = ageV === "" ? null : Math.max(4, Math.min(99, parseInt(ageV, 10) || 0));
+    p.ageGroup = overlay.querySelector("#pf_agegrp").value || "adult";
+    close();
+    save(); renderPlayers(); renderTonight();
+  });
+  overlay.querySelector("[data-remove]").addEventListener("click", () => {
+    if (!confirm(`Remove ${p.name} from the roster?`)) return;
+    S.players = S.players.filter(x => x.id !== pid);
+    close();
+    save(); renderPlayers(); renderTonight();
   });
 }
 
