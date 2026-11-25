@@ -152,6 +152,9 @@ main{max-width:860px;margin:0 auto;
 .sres .lv{margin-left:auto;font-family:var(--fmono);font-size:12.5px;color:var(--muted);flex:none}
 .sres .addbtn{flex:none;width:36px;height:32px;padding:0;font-size:19px;line-height:1}
 .newp{align-self:flex-start;background:none;border:1px dashed var(--border);color:var(--court);font-weight:700}
+.rosterbox{max-height:244px;overflow-y:auto;overscroll-behavior:contain;border:1px solid var(--border);
+  border-radius:12px;padding:6px;background:var(--surface-2)}
+.rosterbox .sres{background:var(--surface)}
 .bench{display:flex;flex-wrap:wrap;gap:6px}
 .benchpill{font-size:12.5px;background:var(--surface-2);border:1px solid var(--border);
   border-radius:999px;padding:4px 10px;display:inline-flex;gap:6px;align-items:center}

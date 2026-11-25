@@ -124,7 +124,7 @@ export function createTournaments(ctx) {
     let h = `<div class="card pad" data-div="${d.id}">
       <div class="row spread" style="align-items:flex-start">
         <div><div class="divtitle">${divLabel(d)}</div>
-          <div class="tiny muted">${d.teams.length} team${d.teams.length !== 1 ? "s" : ""}</div></div>
+          <div class="tiny muted">${d.teams.length} ${teamSize(d) === 1 ? "player" : "team"}${d.teams.length !== 1 ? "s" : ""}</div></div>
         <button class="qbtn qx" data-deldiv="${d.id}" title="Remove division">×</button>
       </div>`;
     if (d.teams.length) h += `<div class="stack" style="gap:6px;margin-top:10px">` + d.teams.map((tm, i) => teamRow(d, tm, i)).join("") + `</div>`;
@@ -251,7 +251,7 @@ export function createTournaments(ctx) {
     return h;
   }
   function matchesSectionHtml(t, d) {
-    if (d.teams.length < 2) return `<p class="tiny faint" style="margin-top:10px">Add at least 2 teams to generate ${t.type === "elimination" ? "a bracket" : "matches"}.</p>`;
+    if (d.teams.length < 2) return `<p class="tiny faint" style="margin-top:10px">Add at least 2 ${teamSize(d) === 1 ? "players" : "teams"} to generate ${t.type === "elimination" ? "a bracket" : "matches"}.</p>`;
     if (!d.matches.length) {
       const label = t.type === "elimination" ? "Generate bracket" : `Generate matches (${d.teams.length * (d.teams.length - 1) / 2})`;
       return `<button class="btn primary sm" data-genmatches="${d.id}" style="margin-top:12px">${label}</button>`;
@@ -269,11 +269,11 @@ export function createTournaments(ctx) {
       return p ? `${esc(p.name)} <span class="gradetag">${gradeOf(pid)}</span>` : "?";
     }).join(` <span class="faint">/</span> `);
     return `<div class="trow"><span class="tnum num">${i + 1}</span><span class="grow">${names}</span>
-      <button class="qbtn qx" data-delteam="${d.id}:${tm.id}" title="Remove team">×</button></div>`;
+      <button class="qbtn qx" data-delteam="${d.id}:${tm.id}" title="Remove ${teamSize(d) === 1 ? "player" : "team"}">×</button></div>`;
   }
   function teamBuilderHtml(d) {
     if (!build || build.divisionId !== d.id) {
-      return `<button class="btn sm" data-buildteam="${d.id}" style="margin-top:10px">+ Add team</button>`;
+      return `<button class="btn sm" data-buildteam="${d.id}" style="margin-top:10px">+ Add ${teamSize(d) === 1 ? "player" : "team"}</button>`;
     }
     const slots = build.slots.map((pid, idx) => {
       if (pid) {
@@ -286,13 +286,13 @@ export function createTournaments(ctx) {
     const full = build.slots.every(Boolean);
     const d2 = d;
     return `<div class="card pad" style="margin-top:10px;background:var(--surface-2)">
-      <div class="eyebrow" style="margin-bottom:6px">New team — ${teamSize(d2) === 1 ? "1 player" : "2 players"}</div>
+      <div class="eyebrow" style="margin-bottom:6px">${teamSize(d2) === 1 ? "New player" : "New team — 2 players"}</div>
       <div class="row wrap" style="gap:8px;margin-bottom:8px">${slots}</div>
       <input type="text" id="tb_search" placeholder="Search roster — ${catLabel(d.category)} ${d.grade} highlighted" autocomplete="off">
-      <div id="tb_results" class="stack" style="gap:5px;margin-top:6px"></div>
+      <div id="tb_results" class="stack rosterbox" style="gap:5px;margin-top:6px"></div>
       <div class="row" style="gap:8px;justify-content:flex-end;margin-top:8px">
         <button class="btn ghost sm" data-cancelbuild="1">Cancel</button>
-        <button class="btn primary sm" data-addteam="${d.id}" ${full ? "" : "disabled"}>Add team</button>
+        <button class="btn primary sm" data-addteam="${d.id}" ${full ? "" : "disabled"}>Add ${teamSize(d2) === 1 ? "player" : "team"}</button>
       </div>
     </div>`;
   }
@@ -410,7 +410,7 @@ export function createTournaments(ctx) {
     q("#pcreate") && q("#pcreate").addEventListener("click", createDivisions);
     el.querySelectorAll("[data-deldiv]").forEach(b => b.addEventListener("click", () => { const t = findT(openId); if (t) { t.divisions = t.divisions.filter(d => d.id !== b.dataset.deldiv); ctx.save(); render(); } }));
     el.querySelectorAll("[data-delteam]").forEach(b => b.addEventListener("click", () => { const [did, tid] = b.dataset.delteam.split(":"); const d = findDiv(did); if (d) { d.teams = d.teams.filter(tm => tm.id !== tid); ctx.save(); render(); } }));
-    el.querySelectorAll("[data-buildteam]").forEach(b => b.addEventListener("click", () => { const d = findDiv(b.dataset.buildteam); if (d) { build = { divisionId: d.id, slots: new Array(teamSize(d)).fill(null) }; render(); } }));
+    el.querySelectorAll("[data-buildteam]").forEach(b => b.addEventListener("click", () => { const d = findDiv(b.dataset.buildteam); if (d) { build = { divisionId: d.id, slots: new Array(teamSize(d)).fill(null), justOpened: true }; render(); } }));
     el.querySelectorAll("[data-cancelbuild]").forEach(b => b.addEventListener("click", () => { build = null; render(); }));
     el.querySelectorAll("[data-unbuild]").forEach(b => b.addEventListener("click", () => { if (build) { build.slots[+b.dataset.unbuild] = null; render(); } }));
     el.querySelectorAll("[data-addteam]").forEach(b => b.addEventListener("click", () => addTeam(b.dataset.addteam)));
@@ -424,7 +424,7 @@ export function createTournaments(ctx) {
       // results are (re)built by updateBuildResults after this wiring, so delegate the picks
       if (results) results.addEventListener("click", e => { const b = e.target.closest("[data-pick]"); if (b) pickPlayer(b.dataset.pick); });
       updateBuildResults();
-      sb.focus();
+      if (build && build.justOpened) { sb.focus(); build.justOpened = false; }
     }
   }
 
