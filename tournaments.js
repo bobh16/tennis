@@ -31,7 +31,9 @@ export function createTournaments(ctx) {
   const weekdayOf = s => { try { return new Date(s + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" }); } catch (e) { return ""; } };
 
   /* ---------- scheduling ---------- */
-  const DEFAULT_SLOT_MIN = 20; // fallback match length before any finish-times exist
+  const DEFAULT_SLOT_MIN = 40; // assumed match length (configurable per tournament)
+  const slotMin = t => Math.max(5, (t && t.slotMin) || DEFAULT_SLOT_MIN);
+  const slotLenMs = t => slotMin(t) * 60000;
   const dayOf = d => d.day || (findT(openId) || {}).startDate || new Date().toISOString().slice(0, 10);
   const fmtClock = ms => { if (ms == null) return ""; try { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } };
   const matchDurMin = m => (m.startedAt != null && m.endedAt != null) ? Math.max(1, Math.round((m.endedAt - m.startedAt) / 60000)) : null;
@@ -47,13 +49,14 @@ export function createTournaments(ctx) {
   }
   // Predict a start time + court for every schedulable match not yet started.
   function predictSchedule(t, d) {
-    const avg = avgDurMin(t) * 60000;
+    const avg = slotLenMs(t);
     const courts = Math.max(1, t.courts || 1);
     const now = Date.now();
     const free = new Array(courts).fill(now);
-    // in-progress matches hold a court until their predicted end
+    // in-progress matches hold a court until their predicted end; if a match runs
+    // past its slot, the court isn't free until now — so the next game re-estimates
     d.matches.filter(m => m.startedAt != null && m.endedAt == null && m.a && m.b)
-      .forEach((m, i) => { if (i < courts) free[i] = Math.max(free[i], m.startedAt + avg); });
+      .forEach((m, i) => { if (i < courts) free[i] = Math.max(free[i], m.startedAt + avg, now); });
     const pending = d.matches.filter(m => m.a && m.b && m.startedAt == null && m.endedAt == null)
       .sort((x, y) => (x.round - y.round) || (ordKey(x) - ordKey(y)) || (x.slot - y.slot));
     const pred = new Map();
@@ -144,7 +147,8 @@ export function createTournaments(ctx) {
     }
     // lay blocks on the clock: a started block anchors to its real start; otherwise
     // it follows the previous block; a fully-finished block advances by real end.
-    const avg = avgDurMin(t) * 60000;
+    const avg = slotLenMs(t);
+    const now = Date.now();
     let clock = dayStartMs(t, day, divs);
     blocks.forEach(b => {
       const callMs = b.div.callTime ? Date.parse(`${day}T${b.div.callTime}:00`) : null;
@@ -153,7 +157,10 @@ export function createTournaments(ctx) {
       b.start = starts.length ? Math.min(...starts) : floor;
       const ends = b.slots.map(s => s.m.endedAt).filter(v => v != null);
       const allEnded = ends.length === b.slots.length;
-      clock = Math.max(b.start, allEnded ? Math.max(...ends) : b.start + avg);
+      const anyStarted = b.slots.some(s => s.m.startedAt != null);
+      // a running block that has blown past its slot pushes the next block to "now"
+      const predEnd = allEnded ? Math.max(...ends) : (anyStarted ? Math.max(b.start + avg, now) : b.start + avg);
+      clock = Math.max(b.start, predEnd);
     });
     return blocks;
   }
@@ -267,6 +274,8 @@ export function createTournaments(ctx) {
       <div class="row wrap" style="gap:14px;align-items:center">
         <label class="divday-lbl tiny muted" title="How many courts are in use">Courts
           <select class="divday" id="sch_courts">${[1,2,3,4,5,6,7,8].map(n => `<option ${n === t.courts ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label class="divday-lbl tiny muted" title="Assumed length of a match, used to estimate times">Match ~mins
+          <input type="number" class="divday" id="sch_slot" min="5" max="180" step="5" value="${slotMin(t)}" style="width:70px"></label>
         <label class="altcheck tiny" title="Rotate divisions so each rests between its matches">
           <input type="checkbox" id="sch_alt" ${alternate ? "checked" : ""}> Alternate divisions on the courts</label>
       </div>
@@ -835,6 +844,10 @@ export function createTournaments(ctx) {
     const t = findT(openId); if (!t) return;
     t.alternate = !!on; ctx.save(); render();
   }
+  function setSlot(n) {
+    const t = findT(openId); if (!t) return;
+    t.slotMin = Math.max(5, Math.min(180, parseInt(n, 10) || DEFAULT_SLOT_MIN)); ctx.save(); render();
+  }
   function moveRotation(day, divId, dir) {
     const t = findT(openId); if (!t) return;
     const ordered = orderedDivsForDay(t, day);
@@ -892,6 +905,7 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-ttab]").forEach(b => b.addEventListener("click", () => { detailTab = b.dataset.ttab; render(); }));
     const sc = q("#sch_courts"); if (sc) sc.addEventListener("change", () => setCourts(sc.value));
     const sa = q("#sch_alt"); if (sa) sa.addEventListener("change", () => setAlternate(sa.checked));
+    const ss = q("#sch_slot"); if (ss) ss.addEventListener("change", () => setSlot(ss.value));
     el.querySelectorAll("[data-rotmove]").forEach(b => b.addEventListener("click", () => { const [day, did, dir] = b.dataset.rotmove.split(":"); moveRotation(day, did, dir); }));
     el.querySelectorAll("[data-startmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid, court] = b.dataset.startmatch.split(":"); startStamp(did, mid, court); }));
     el.querySelectorAll("[data-mscore]").forEach(b => b.addEventListener("click", () => { const [did, mid, side, dir] = b.dataset.mscore.split(":"); stepScore(did, mid, side, dir); }));
