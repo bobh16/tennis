@@ -328,6 +328,15 @@ export function createTournaments(ctx) {
     if (!build) return;
     const i = build.slots.indexOf(null);
     if (i < 0) return;
+    const d = findDiv(build.divisionId), p = ctx.byId(pid);
+    if (d && p) {
+      const reasons = [];
+      const g = tierOf(p.rating).cls;
+      if (g !== d.grade) reasons.push(`graded ${g}, not ${d.grade}`);
+      const want = d.category === "mixed" ? null : (d.category === "womens" ? "f" : "m");
+      if (want && p.gender && p.gender !== want) reasons.push(`listed ${p.gender === "f" ? "Women" : "Men"}, not ${catLabel(d.category)}`);
+      if (reasons.length && !confirm(`${p.name} is ${reasons.join(" and ")}. Add to ${divLabel(d)} anyway?`)) return;
+    }
     build.slots[i] = pid;
     render();
   }
