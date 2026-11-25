@@ -349,6 +349,33 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .morder{display:inline-flex;align-items:center;gap:3px;flex:none;margin-right:2px}
 .morder .onum{min-width:16px;text-align:center;font-size:12px;color:var(--muted);font-weight:700}
 .iconbtn:disabled{opacity:.35;cursor:default}
+/* tournament schedule */
+.schedday{border-top:1px solid var(--border);padding-top:10px}
+.schedday-h{font-weight:800;font-size:14px}
+.todaytag{display:inline-block;background:var(--court);color:#fff;font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;vertical-align:middle;margin-left:4px}
+.schedblock{margin-top:8px;border:1px solid var(--border);border-radius:11px;padding:8px;background:var(--surface-2)}
+.blockhd{display:flex;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.blocktime{font-family:var(--fmono);font-weight:800;font-size:14px;color:var(--court)}
+.blockdiv{font-weight:700;font-size:13px}
+.schedblock .mrow{background:var(--surface)}
+.courttag{flex:none;font-family:var(--fmono);font-weight:800;font-size:11px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:2px 5px}
+.schedctrl{flex:none;display:flex;align-items:center;gap:6px}
+.card.offday{opacity:.62}
+.offday-tag{color:var(--muted);font-weight:700;margin-bottom:6px}
+/* tournament detail tabs */
+.ttabs{display:flex;gap:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:11px;padding:4px;overflow-x:auto}
+.ttab{flex:1;min-width:max-content;padding:8px 12px;border:none;background:none;border-radius:8px;
+  font-weight:700;font-size:13px;color:var(--muted);cursor:pointer;white-space:nowrap}
+.ttab.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.livedot{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 4px;
+  background:var(--court);color:#fff;border-radius:999px;font-size:10px;font-weight:800;margin-left:3px}
+.ttab-body{display:flex;flex-direction:column;gap:12px}
+.livescore{display:flex;align-items:center;justify-content:center;gap:14px;margin:6px 0}
+.livescore .sval{font-family:var(--fmono);font-size:34px;font-weight:800;min-width:46px;text-align:center}
+.sbtn{width:46px;height:46px;border-radius:12px;border:1px solid var(--border);background:var(--surface-2);
+  font-size:24px;line-height:1;cursor:pointer;color:var(--ink)}
+.sbtn:active{background:var(--court);color:#fff}
 
 /* home dashboard + section sub-nav */
 nav.subnav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 58px);z-index:25;background:var(--court);box-shadow:var(--shadow)}

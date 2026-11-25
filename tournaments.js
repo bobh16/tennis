@@ -81,7 +81,67 @@ export function createTournaments(ctx) {
     return `<p class="tiny muted schednote" style="margin:0 0 8px">${parts.join(" · ")}</p>`;
   }
 
+  /* ---------- tournament-wide day schedule (shared courts, divisions rotate) ---------- */
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+  const divisionsForDay = (t, day) => t.divisions.filter(d => dayOf(d) === day);
+  function daysOf(t) {
+    return [...new Set(t.divisions.map(d => dayOf(d)))].sort();
+  }
+  function dayStartMs(t, day, divs) {
+    const calls = divs.map(d => d.callTime).filter(Boolean)
+      .map(ct => Date.parse(`${day}T${ct}:00`)).filter(v => !isNaN(v));
+    if (calls.length) return Math.min(...calls);
+    const def = Date.parse(`${day}T09:00:00`);
+    return isNaN(def) ? Date.now() : def;
+  }
+  // Rotate divisions across the shared court pool: each turn, one division fills
+  // the courts with its next matches (no shared team in a block), then rests while
+  // the next division plays. Returns timed blocks for the day.
+  function buildDaySchedule(t, day) {
+    const courts = Math.max(1, t.courts || 1);
+    const divs = divisionsForDay(t, day).filter(d => d.matches.some(m => m.a && m.b));
+    // division that calls earliest rotates first; then by grade order, then as listed
+    divs.sort((a, b) => {
+      const ca = a.callTime ? Date.parse(`${day}T${a.callTime}:00`) : Infinity;
+      const cb = b.callTime ? Date.parse(`${day}T${b.callTime}:00`) : Infinity;
+      return (ca - cb) || (GRADES.indexOf(a.grade) - GRADES.indexOf(b.grade));
+    });
+    const queues = divs.map(d => ({ d, ms: [...d.matches].filter(m => m.a && m.b && m.endedAt == null).sort((x, y) => ordKey(x) - ordKey(y)) }));
+    const blocks = [];
+    let di = 0, guard = 0;
+    const anyLeft = () => queues.some(q => q.ms.length);
+    while (anyLeft() && guard++ < 999) {
+      let q = null, scanned = 0;
+      while (scanned < queues.length) { const c = queues[di % queues.length]; di++; scanned++; if (c.ms.length) { q = c; break; } }
+      if (!q) break;
+      const block = { div: q.d, slots: [] }, used = new Set();
+      while (block.slots.length < courts && q.ms.length) {
+        const idx = q.ms.findIndex(m => !used.has(m.a) && !used.has(m.b));
+        if (idx < 0) break;
+        const m = q.ms.splice(idx, 1)[0];
+        used.add(m.a); used.add(m.b);
+        block.slots.push({ m, court: block.slots.length + 1 });
+      }
+      if (block.slots.length) blocks.push(block);
+    }
+    // lay blocks on the clock: a started block anchors to its real start; otherwise
+    // it follows the previous block; a fully-finished block advances by real end.
+    const avg = avgDurMin(t) * 60000;
+    let clock = dayStartMs(t, day, divs);
+    blocks.forEach(b => {
+      const callMs = b.div.callTime ? Date.parse(`${day}T${b.div.callTime}:00`) : null;
+      const floor = (callMs != null && !isNaN(callMs)) ? Math.max(clock, callMs) : clock; // a division never plays before its call time
+      const starts = b.slots.map(s => s.m.startedAt).filter(v => v != null);
+      b.start = starts.length ? Math.min(...starts) : floor;
+      const ends = b.slots.map(s => s.m.endedAt).filter(v => v != null);
+      const allEnded = ends.length === b.slots.length;
+      clock = Math.max(b.start, allEnded ? Math.max(...ends) : b.start + avg);
+    });
+    return blocks;
+  }
+
   let openId = null, newOpen = false, build = null; // build = { divisionId, slots: [playerId|null,…] }
+  let detailTab = "setup"; // setup | schedule | courts | standings
   let pf = new Set(), pg = new Set(), draft = new Map(); // division batch builder: formats, grades, staged divisions
 
   const findDiv = id => { const t = findT(openId); return t && t.divisions.find(d => d.id === id); };
@@ -151,10 +211,147 @@ export function createTournaments(ctx) {
           <h2 style="font-size:22px">${esc(t.name)}</h2></div>
         <button class="btn ghost sm" id="tDelete" style="color:var(--bad)">Delete</button>
       </div>`;
-    h += divisionBuilderHtml(t);
-    if (!t.divisions.length) h += `<p class="tiny faint" style="margin:0">No divisions yet. Add one (e.g. Women's Doubles · C1), then enter teams from your roster.</p>`;
-    h += `<div class="stack" style="gap:12px">` + t.divisions.map(d => divisionHtml(t, d)).join("") + `</div>`;
+    const live = t.divisions.reduce((n, d) => n + d.matches.filter(m => m.startedAt != null && m.endedAt == null && m.a && m.b).length, 0);
+    const TABS = [
+      ["setup", "Setup"],
+      ["schedule", "Schedule"],
+      ["courts", `Playing now${live ? ` <span class="livedot">${live}</span>` : ""}`],
+      ["standings", "Standings"],
+    ];
+    h += `<div class="ttabs" role="tablist">` + TABS.map(([k, label]) =>
+      `<button class="ttab ${detailTab === k ? "on" : ""}" data-ttab="${k}" role="tab" aria-selected="${detailTab === k}">${label}</button>`).join("") + `</div>`;
+    h += `<div class="ttab-body">`;
+    if (detailTab === "setup") h += setupTabHtml(t);
+    else if (detailTab === "schedule") h += scheduleSectionHtml(t) || `<p class="tiny faint" style="margin:0">No matches yet. Add teams and generate matches in Setup, then set each division's day and call time.</p>`;
+    else if (detailTab === "courts") h += courtsTabHtml(t);
+    else if (detailTab === "standings") h += standingsTabHtml(t);
+    h += `</div>`;
     return h;
+  }
+  function setupTabHtml(t) {
+    let h = divisionBuilderHtml(t);
+    if (!t.divisions.length) return h + `<p class="tiny faint" style="margin:0">No divisions yet. Add one (e.g. Women's Doubles · C1), then enter teams from your roster.</p>`;
+    const today = todayISO();
+    const sorted = [...t.divisions].sort((a, b) => {
+      const da = dayOf(a), db = dayOf(b);
+      return ((da === today ? 0 : 1) - (db === today ? 0 : 1)) || (da < db ? -1 : da > db ? 1 : 0);
+    });
+    return h + `<div class="stack" style="gap:12px">` + sorted.map(d => divisionHtml(t, d, d.day && dayOf(d) !== today)).join("") + `</div>`;
+  }
+  function scheduleSectionHtml(t) {
+    const days = daysOf(t).filter(day => divisionsForDay(t, day).some(d => d.matches.some(m => m.a && m.b)));
+    if (!days.length) return "";
+    const today = todayISO();
+    days.sort((a, b) => ((a === today ? 0 : 1) - (b === today ? 0 : 1)) || (a < b ? -1 : 1));
+    let h = `<div class="card pad stack">
+      <div class="eyebrow">Schedule · shared courts</div>
+      <p class="tiny muted" style="margin:0">Divisions take turns on the ${t.courts} court${t.courts > 1 ? "s" : ""}: one fills the courts, then rests while the next plays. Times run from each division's call time and the average match length. Start / Finish a match to move the clock.</p>`;
+    days.forEach(day => {
+      const blocks = buildDaySchedule(t, day);
+      const isToday = day === today;
+      h += `<div class="schedday"><div class="row spread" style="align-items:center">
+        <div class="schedday-h">${weekdayOf(day)}, ${fmtDate(day)}${isToday ? ` <span class="todaytag">Today</span>` : ""}</div>
+        <div class="tiny faint">${blocks.length} round${blocks.length !== 1 ? "s" : ""}</div></div>`;
+      if (!blocks.length) h += `<p class="tiny faint" style="margin:4px 0 0">All matches finished.</p>`;
+      blocks.forEach((b, i) => {
+        h += `<div class="schedblock">
+          <div class="blockhd"><span class="blocktime">${fmtClock(b.start)}</span>
+            <span class="blockdiv">${divLabel(b.div)}</span>
+            <span class="tiny faint">Round ${i + 1}</span></div>
+          ${b.slots.map(s => scheduleRow(b.div, s.m, s.court)).join("")}</div>`;
+      });
+      h += `</div>`;
+    });
+    return h;
+  }
+  function scheduleRow(d, m, court) {
+    const aName = teamName(d, m.a), bName = teamName(d, m.b);
+    const sa = m.scoreA == null ? "" : m.scoreA, sb = m.scoreB == null ? "" : m.scoreB;
+    const aw = m.done && m.scoreA > m.scoreB, bw = m.done && m.scoreB > m.scoreA;
+    const inp = side => `<input class="msc" type="number" min="0" max="99" inputmode="numeric" data-score="${d.id}:${m.id}:${side}" value="${side === "A" ? sa : sb}">`;
+    let ctrl;
+    if (m.startedAt == null) ctrl = `<button class="btn sm mstart" data-startmatch="${d.id}:${m.id}:${court}">Start</button>`;
+    else if (m.endedAt == null) ctrl = `<span class="mlive">● ${fmtClock(m.startedAt)}</span><button class="btn sm primary mfinish" data-finishmatch="${d.id}:${m.id}">Finish</button>`;
+    else ctrl = `<span class="mdone-t">${fmtClock(m.startedAt)}–${fmtClock(m.endedAt)}</span>`;
+    return `<div class="mrow ${m.done ? "done" : ""}">
+      <span class="courttag">C${court}</span>
+      <span class="mt ${aw ? "win" : ""}">${aName}</span>
+      ${inp("A")}<span class="faint mono">–</span>${inp("B")}
+      <span class="mt end ${bw ? "win" : ""}">${bName}</span>
+      <span class="schedctrl">${ctrl}</span>
+    </div>`;
+  }
+  /* ---------- Playing now (live court board) ---------- */
+  function courtsTabHtml(t) {
+    const courts = Math.max(1, t.courts || 1);
+    // every match, tagged with its division, split into live / finished
+    const all = [];
+    t.divisions.forEach(d => d.matches.forEach(m => { if (m.a && m.b) all.push({ d, m }); }));
+    const liveOnes = all.filter(x => x.m.startedAt != null && x.m.endedAt == null);
+    const byCourt = {};
+    liveOnes.forEach(x => { if (x.m.court) (byCourt[x.m.court] = byCourt[x.m.court] || []).push(x); });
+    const unplaced = liveOnes.filter(x => !x.m.court);
+    let h = `<div class="courts">`;
+    for (let n = 1; n <= courts; n++) {
+      const here = (byCourt[n] || [])[0] || unplaced.shift();
+      h += courtBoardCard(n, here);
+    }
+    h += `</div>`;
+    // recent results
+    const done = all.filter(x => x.m.endedAt != null || x.m.done)
+      .sort((a, b) => (b.m.endedAt || 0) - (a.m.endedAt || 0));
+    h += `<div class="stack" style="gap:6px;margin-top:14px"><div class="eyebrow">Recent results</div>`;
+    h += done.length ? done.slice(0, 20).map(x => resultRow(x.d, x.m)).join("")
+      : `<p class="tiny faint" style="margin:0">No finished matches yet.</p>`;
+    h += `</div>`;
+    return h;
+  }
+  function courtBoardCard(n, x) {
+    if (!x) return `<div class="court free">
+      <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">open</span></div>
+      <div class="freebody"><p class="muted" style="margin:0;font-weight:600">No match running</p>
+        <p class="tiny faint" style="margin:0">Start a match from the Schedule to put it here.</p></div></div>`;
+    const { d, m } = x;
+    const big = side => `<div class="livescore"><button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:dec">–</button>` +
+      `<span class="sval num">${m["score" + side] == null ? 0 : m["score" + side]}</span>` +
+      `<button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:inc">+</button></div>`;
+    return `<div class="court">
+      <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)}</span></div>
+      <div class="team"><div class="teamtag">Team 1</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
+      ${big("A")}
+      <div class="vs">VS</div>
+      <div class="team b"><div class="teamtag">Team 2</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>
+      ${big("B")}
+      <div class="score-cap">Race to 6 · live since ${fmtClock(m.startedAt)}</div>
+      <div class="court-foot"><button class="btn cta finishbtn" data-finishmatch="${d.id}:${m.id}">Match finished ✓</button></div>
+    </div>`;
+  }
+  function resultRow(d, m) {
+    const aw = m.scoreA > m.scoreB, bw = m.scoreB > m.scoreA;
+    const t = m.endedAt ? fmtClock(m.endedAt) : "";
+    return `<div class="mrow done">
+      <span class="courttag">${d.grade}</span>
+      <span class="mt ${aw ? "win" : ""}">${teamName(d, m.a)}</span>
+      <span class="num"><b>${m.scoreA == null ? "–" : m.scoreA}</b></span><span class="faint mono">–</span><span class="num"><b>${m.scoreB == null ? "–" : m.scoreB}</b></span>
+      <span class="mt end ${bw ? "win" : ""}">${teamName(d, m.b)}</span>
+      ${t ? `<span class="mdone-t">${t}</span>` : ""}
+    </div>`;
+  }
+  /* ---------- Standings (all divisions) ---------- */
+  function standingsTabHtml(t) {
+    const rr = t.divisions.filter(d => d.discipline !== undefined);
+    const withMatches = t.divisions.filter(d => d.matches.some(m => m.a && m.b));
+    if (!withMatches.length) return `<p class="tiny faint" style="margin:0">No matches yet — standings appear once matches are generated and scored.</p>`;
+    return withMatches.map(d => `<div class="card pad"><div class="divtitle" style="margin-bottom:2px">${divLabel(d)}</div>` +
+      (t.type === "elimination" ? bracketStandingNote(d) : standingsHtml(d)) + `</div>`).join("");
+  }
+  function bracketStandingNote(d) {
+    const rounds = [...new Set(d.matches.map(m => m.round))];
+    const total = rounds.length;
+    const finalM = d.matches.find(m => m.round === total);
+    const champ = finalM && winnerOf(finalM);
+    return champ ? `<p class="tiny" style="margin:6px 0 0;color:var(--good);font-weight:700">🏆 ${teamName(d, champ)} — champion</p>`
+      : `<p class="tiny faint" style="margin:6px 0 0">Bracket in progress — see Setup for the draw.</p>`;
   }
   function divisionBuilderHtml(t) {
     const d = [...draft.values()], n = pf.size * pg.size;
@@ -172,10 +369,11 @@ export function createTournaments(ctx) {
         : `<p class="tiny faint" style="margin:0">Pick formats and grades, add them to the list (stack as many batches as you like), then create them all. Duplicates are skipped.</p>`}
     </div>`;
   }
-  function divisionHtml(t, d) {
+  function divisionHtml(t, d, offDay) {
     const day = dayOf(d);
     const callTxt = d.callTime ? ` · call ${fmtClock(Date.parse(`${day}T${d.callTime}:00`))}` : "";
-    let h = `<div class="card pad" data-div="${d.id}">
+    let h = `<div class="card pad${offDay ? " offday" : ""}" data-div="${d.id}">
+      ${offDay ? `<div class="offday-tag tiny">Not playing today — plays ${weekdayOf(day)}</div>` : ""}
       <div class="row spread" style="align-items:flex-start;gap:8px">
         <div><div class="divtitle">${divLabel(d)}</div>
           <div class="tiny muted">${d.teams.length} ${teamSize(d) === 1 ? "player" : "team"}${d.teams.length !== 1 ? "s" : ""} · ${weekdayOf(day)}${callTxt}</div></div>
@@ -522,9 +720,19 @@ export function createTournaments(ctx) {
     const m = findMatch(divId, matchId); if (!m) return;
     m.slotTime = val || null; ctx.save(); render();
   }
-  function startStamp(divId, matchId) {
+  function startStamp(divId, matchId, court) {
     const m = findMatch(divId, matchId); if (!m) return;
-    m.startedAt = Date.now(); m.endedAt = null; ctx.save(); render();
+    m.startedAt = Date.now(); m.endedAt = null;
+    if (court != null && court !== "") m.court = parseInt(court, 10);
+    ctx.save(); render();
+  }
+  function stepScore(divId, matchId, side, dir) {
+    const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
+    const cur = m["score" + side] == null ? 0 : m["score" + side];
+    m["score" + side] = Math.max(0, Math.min(99, cur + (dir === "inc" ? 1 : -1)));
+    m.done = m.scoreA != null && m.scoreB != null && m.scoreA !== m.scoreB;
+    if (t && t.type === "elimination") { m.winner = m.done ? (m.scoreA > m.scoreB ? m.a : m.b) : null; advanceBracket(d); }
+    ctx.save(); render();
   }
   function finishStamp(divId, matchId) {
     const m = findMatch(divId, matchId); if (!m) return;
@@ -560,7 +768,7 @@ export function createTournaments(ctx) {
     q("#tNew") && q("#tNew").addEventListener("click", () => { newOpen = true; render(); });
     q("#tf_cancel") && q("#tf_cancel").addEventListener("click", () => { newOpen = false; render(); });
     q("#tf_create") && q("#tf_create").addEventListener("click", createTournament);
-    el.querySelectorAll("[data-open]").forEach(c => c.addEventListener("click", () => { openId = c.dataset.open; newOpen = false; build = null; pf.clear(); pg.clear(); draft.clear(); render(); }));
+    el.querySelectorAll("[data-open]").forEach(c => c.addEventListener("click", () => { openId = c.dataset.open; newOpen = false; build = null; detailTab = "setup"; pf.clear(); pg.clear(); draft.clear(); render(); }));
     q("#tBack") && q("#tBack").addEventListener("click", () => { openId = null; build = null; pf.clear(); pg.clear(); draft.clear(); render(); });
     q("#tDelete") && q("#tDelete").addEventListener("click", () => {
       if (confirm("Delete this tournament? This can't be undone.")) { ctx.state.tournaments = tournaments().filter(t => t.id !== openId); openId = null; build = null; ctx.save(); render(); }
@@ -583,7 +791,9 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-divday]").forEach(inp => inp.addEventListener("change", () => setDivDay(inp.dataset.divday, inp.value)));
     el.querySelectorAll("[data-court]").forEach(sel => sel.addEventListener("change", () => { const [did, mid] = sel.dataset.court.split(":"); setCourt(did, mid, sel.value); }));
     el.querySelectorAll("[data-slottime]").forEach(inp => inp.addEventListener("change", () => { const [did, mid] = inp.dataset.slottime.split(":"); setSlotTime(did, mid, inp.value); }));
-    el.querySelectorAll("[data-startmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.startmatch.split(":"); startStamp(did, mid); }));
+    el.querySelectorAll("[data-ttab]").forEach(b => b.addEventListener("click", () => { detailTab = b.dataset.ttab; render(); }));
+    el.querySelectorAll("[data-startmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid, court] = b.dataset.startmatch.split(":"); startStamp(did, mid, court); }));
+    el.querySelectorAll("[data-mscore]").forEach(b => b.addEventListener("click", () => { const [did, mid, side, dir] = b.dataset.mscore.split(":"); stepScore(did, mid, side, dir); }));
     el.querySelectorAll("[data-finishmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.finishmatch.split(":"); finishStamp(did, mid); }));
     el.querySelectorAll("[data-resettime]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.resettime.split(":"); resetStamp(did, mid); }));
     el.querySelectorAll("[data-calltime]").forEach(inp => inp.addEventListener("change", () => setCallTime(inp.dataset.calltime, inp.value)));
