@@ -318,3 +318,11 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .gchip.f{background:color-mix(in srgb,#c0559c 20%,transparent);color:#b4458e}
 .gchip.m{background:color-mix(in srgb,#2f74d0 18%,transparent);color:#2f74d0}
 .sres.hl{border-color:var(--court);background:color-mix(in srgb,var(--court) 8%,var(--surface))}
+
+/* tournament matches */
+.mrow{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;padding:6px 8px;background:var(--surface)}
+.mrow.done{background:var(--surface-2)}
+.mrow .mt{flex:1;min-width:0;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow .mt.end{text-align:right}
+.mrow .mt.win{color:var(--court)}
+.msc{width:46px;text-align:center;padding:5px 4px;font-family:var(--fmono);font-size:15px;flex:none}

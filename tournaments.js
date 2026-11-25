@@ -111,7 +111,139 @@ export function createTournaments(ctx) {
       </div>`;
     if (d.teams.length) h += `<div class="stack" style="gap:6px;margin-top:10px">` + d.teams.map((tm, i) => teamRow(d, tm, i)).join("") + `</div>`;
     h += teamBuilderHtml(d);
+    h += matchesSectionHtml(t, d);
     return h + `</div>`;
+  }
+
+  /* ---------- matches, bracket, standings ---------- */
+  function teamName(d, teamId) {
+    const tm = d.teams.find(x => x.id === teamId);
+    if (!tm) return "—";
+    return tm.players.map(pid => { const p = ctx.byId(pid); return p ? esc(p.name) : "?"; }).join(" / ");
+  }
+  function genRoundRobin(teams) {
+    const ms = [];
+    for (let i = 0; i < teams.length; i++)
+      for (let j = i + 1; j < teams.length; j++)
+        ms.push({ id: uid("m"), round: 1, slot: ms.length, a: teams[i].id, b: teams[j].id, scoreA: null, scoreB: null, done: false, winner: null });
+    return ms;
+  }
+  function seedOrder(size) {
+    let seeds = [1, 2];
+    while (seeds.length < size) {
+      const sum = seeds.length * 2 + 1, next = [];
+      seeds.forEach(s => { next.push(s); next.push(sum - s); });
+      seeds = next;
+    }
+    return seeds;
+  }
+  function genElimination(teams) {
+    const ids = teams.map(t => t.id), n = ids.length;
+    if (n < 2) return [];
+    let size = 1; while (size < n) size *= 2;
+    const order = seedOrder(size).map(pos => pos <= n ? ids[pos - 1] : null);
+    const matches = [];
+    let slot = 0;
+    for (let i = 0; i < size; i += 2)
+      matches.push({ id: uid("m"), round: 1, slot: slot++, a: order[i], b: order[i + 1], scoreA: null, scoreB: null, done: false, winner: null });
+    let count = size / 2, r = 2;
+    while (count > 1) {
+      for (let s = 0; s < count / 2; s++)
+        matches.push({ id: uid("m"), round: r, slot: s, a: null, b: null, scoreA: null, scoreB: null, done: false, winner: null });
+      count /= 2; r++;
+    }
+    return matches;
+  }
+  function winnerOf(m) {
+    if (!m) return null;
+    if (m.a && !m.b) return m.a;
+    if (m.b && !m.a) return m.b;
+    if (m.done && m.scoreA != null && m.scoreB != null && m.scoreA !== m.scoreB) return m.scoreA > m.scoreB ? m.a : m.b;
+    return null;
+  }
+  function advanceBracket(d) {
+    const at = {}; let maxRound = 1;
+    d.matches.forEach(m => { at[m.round + "-" + m.slot] = m; if (m.round > maxRound) maxRound = m.round; });
+    for (let r = 2; r <= maxRound; r++) {
+      d.matches.filter(m => m.round === r).forEach(m => {
+        m.a = winnerOf(at[(r - 1) + "-" + (m.slot * 2)]);
+        m.b = winnerOf(at[(r - 1) + "-" + (m.slot * 2 + 1)]);
+      });
+    }
+  }
+  function standings(d) {
+    const table = {};
+    d.teams.forEach(tm => table[tm.id] = { team: tm, w: 0, l: 0, gf: 0, ga: 0, played: 0 });
+    d.matches.forEach(m => {
+      if (!m.done || !table[m.a] || !table[m.b]) return;
+      const A = table[m.a], B = table[m.b];
+      A.gf += m.scoreA; A.ga += m.scoreB; B.gf += m.scoreB; B.ga += m.scoreA;
+      A.played++; B.played++;
+      if (m.scoreA > m.scoreB) { A.w++; B.l++; } else { B.w++; A.l++; }
+    });
+    const rows = Object.values(table).map(r => ({ ...r, q: r.ga > 0 ? r.gf / r.ga : (r.gf > 0 ? Infinity : 0) }));
+    rows.sort((x, y) => (y.w - x.w) || (y.q - x.q) || (y.gf - x.gf));
+    return rows;
+  }
+  function roundLabel(r, total) {
+    if (r === total) return "Final";
+    if (r === total - 1) return "Semifinals";
+    if (r === total - 2) return "Quarterfinals";
+    return "Round " + r;
+  }
+  function matchRow(d, m) {
+    const scorable = m.a && m.b;
+    const aName = m.a ? teamName(d, m.a) : (m.b ? "(bye)" : "TBD");
+    const bName = m.b ? teamName(d, m.b) : (m.a ? "(bye)" : "TBD");
+    const sa = m.scoreA == null ? "" : m.scoreA, sb = m.scoreB == null ? "" : m.scoreB;
+    const aw = m.done && m.scoreA > m.scoreB, bw = m.done && m.scoreB > m.scoreA;
+    const inp = side => `<input class="msc" type="number" min="0" max="99" inputmode="numeric" data-score="${d.id}:${m.id}:${side}" value="${side === "A" ? sa : sb}">`;
+    return `<div class="mrow ${m.done ? "done" : ""}">
+      <span class="mt ${aw ? "win" : ""}">${aName}</span>
+      ${scorable ? inp("A") : `<span class="faint mono">–</span>`}
+      <span class="faint mono">–</span>
+      ${scorable ? inp("B") : `<span class="faint mono">–</span>`}
+      <span class="mt end ${bw ? "win" : ""}">${bName}</span>
+    </div>`;
+  }
+  function standingsHtml(d) {
+    const rows = standings(d);
+    let h = `<div class="eyebrow" style="margin-top:14px;margin-bottom:6px">Standings
+      <span class="infobtn" title="Ranked by wins, then quotient (games won ÷ games lost)" style="cursor:default">i</span></div>
+      <div class="tablewrap"><table class="today"><thead><tr><th>#</th><th>Team</th><th class="r">W–L</th><th class="r">Games</th><th class="r">Quotient</th></tr></thead><tbody>`;
+    h += rows.map((r, i) => `<tr><td class="num">${i + 1}</td><td>${teamName(d, r.team.id)}</td>` +
+      `<td class="r num">${r.w}–${r.l}</td><td class="r num">${r.gf}–${r.ga}</td>` +
+      `<td class="r num">${r.q === Infinity ? "∞" : r.q.toFixed(2)}</td></tr>`).join("");
+    h += `</tbody></table></div>`;
+    return h;
+  }
+  function bracketHtml(t, d) {
+    const rounds = [...new Set(d.matches.map(m => m.round))].sort((a, b) => a - b);
+    const total = rounds.length;
+    let h = `<div class="eyebrow" style="margin-top:14px;margin-bottom:6px">Bracket</div>`;
+    rounds.forEach(r => {
+      h += `<div class="tiny muted" style="margin:8px 0 4px;font-weight:700">${roundLabel(r, total)}</div><div class="stack" style="gap:6px">`;
+      h += d.matches.filter(m => m.round === r).sort((a, b) => a.slot - b.slot).map(m => matchRow(d, m)).join("");
+      h += `</div>`;
+    });
+    const finalM = d.matches.find(m => m.round === total);
+    const champ = finalM && winnerOf(finalM);
+    if (champ) h += `<div class="banner" style="margin-top:10px"><span aria-hidden="true">🏆</span><div class="grow"><b>${teamName(d, champ)}</b> — division champion.</div></div>`;
+    h += `<button class="btn ghost sm" data-regen="${d.id}" style="margin-top:8px">Regenerate bracket</button>`;
+    return h;
+  }
+  function matchesSectionHtml(t, d) {
+    if (d.teams.length < 2) return `<p class="tiny faint" style="margin-top:10px">Add at least 2 teams to generate ${t.type === "elimination" ? "a bracket" : "matches"}.</p>`;
+    if (!d.matches.length) {
+      const label = t.type === "elimination" ? "Generate bracket" : `Generate matches (${d.teams.length * (d.teams.length - 1) / 2})`;
+      return `<button class="btn primary sm" data-genmatches="${d.id}" style="margin-top:12px">${label}</button>`;
+    }
+    if (t.type === "elimination") return bracketHtml(t, d);
+    let h = `<div class="eyebrow" style="margin-top:14px;margin-bottom:6px">Matches</div><div class="stack" style="gap:6px">`;
+    h += d.matches.map(m => matchRow(d, m)).join("");
+    h += `</div><button class="btn ghost sm" data-regen="${d.id}" style="margin-top:8px">Regenerate</button>`;
+    h += standingsHtml(d);
+    return h;
   }
   function teamRow(d, tm, i) {
     const names = tm.players.map(pid => {
@@ -205,6 +337,24 @@ export function createTournaments(ctx) {
     d.teams.push({ id: uid("tm"), players: build.slots.slice() });
     build = null; ctx.save(); render();
   }
+  function genMatches(divId) {
+    const t = findT(openId), d = findDiv(divId); if (!t || !d) return;
+    d.matches = t.type === "elimination" ? genElimination(d.teams) : genRoundRobin(d.teams);
+    if (t.type === "elimination") advanceBracket(d);
+    ctx.save(); render();
+  }
+  function regen(divId) {
+    if (!confirm("Regenerate matches? Any entered scores will be cleared.")) return;
+    genMatches(divId);
+  }
+  function setScore(divId, matchId, side, val) {
+    const t = findT(openId), d = findDiv(divId); if (!d) return;
+    const m = d.matches.find(x => x.id === matchId); if (!m) return;
+    m["score" + side] = val === "" ? null : Math.max(0, Math.min(99, parseInt(val, 10) || 0));
+    m.done = m.scoreA != null && m.scoreB != null && m.scoreA !== m.scoreB;
+    if (t && t.type === "elimination") { m.winner = m.done ? (m.scoreA > m.scoreB ? m.a : m.b) : null; advanceBracket(d); }
+    ctx.save(); render();
+  }
 
   /* ---------- wiring ---------- */
   function wire() {
@@ -224,6 +374,9 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-cancelbuild]").forEach(b => b.addEventListener("click", () => { build = null; render(); }));
     el.querySelectorAll("[data-unbuild]").forEach(b => b.addEventListener("click", () => { if (build) { build.slots[+b.dataset.unbuild] = null; render(); } }));
     el.querySelectorAll("[data-addteam]").forEach(b => b.addEventListener("click", () => addTeam(b.dataset.addteam)));
+    el.querySelectorAll("[data-genmatches]").forEach(b => b.addEventListener("click", () => genMatches(b.dataset.genmatches)));
+    el.querySelectorAll("[data-regen]").forEach(b => b.addEventListener("click", () => regen(b.dataset.regen)));
+    el.querySelectorAll("[data-score]").forEach(inp => inp.addEventListener("change", () => { const [did, mid, side] = inp.dataset.score.split(":"); setScore(did, mid, side, inp.value); }));
     const sb = q("#tb_search");
     if (sb) {
       sb.addEventListener("input", updateBuildResults);
