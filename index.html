@@ -22,10 +22,10 @@
   <header class="app">
     <div class="hwrap">
       <div class="brand">
-        <span class="ball" aria-hidden="true"></span>
+        <span class="ball" id="brandBall" aria-hidden="true"></span>
         <div>
-          <h1>Court Sense</h1>
-          <div class="sub">Open-play matchmaking</div>
+          <h1 id="brandName">Court Sense</h1>
+          <div class="sub" id="brandSub">Open-play matchmaking</div>
         </div>
       </div>
       <div class="courts-ctl">
@@ -34,6 +34,7 @@
           <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
         </select>
       </div>
+      <button class="theme-btn" id="settingsBtn" title="Branding & settings" aria-label="Branding and settings">⚙</button>
       <button class="theme-btn" id="themeBtn" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
     </div>
   </header>
@@ -49,6 +50,31 @@
     <section id="view-players" class="stack" hidden></section>
     <section id="view-how" class="stack" hidden></section>
   </main>
+
+  <div id="brandingModal" class="modal" hidden>
+    <div class="modal-backdrop" id="brandBackdrop"></div>
+    <div class="modal-card">
+      <div class="row spread" style="align-items:center">
+        <h2 style="font-size:18px">Club branding</h2>
+        <button class="btn ghost sm" id="brandClose">Close</button>
+      </div>
+      <label class="field">Club or company name
+        <input type="text" id="brandNameInput" placeholder="e.g. Tenneast Academy" autocomplete="off"></label>
+      <div class="field"><span>Logo</span>
+        <div class="row" style="gap:14px;align-items:center">
+          <div class="logo-preview empty" id="brandLogoPreview" aria-hidden="true"></div>
+          <div class="row wrap" style="gap:8px">
+            <label class="btn sm" style="cursor:pointer">Upload logo<input type="file" id="brandLogoInput" accept="image/*" hidden></label>
+            <button class="btn sm ghost" id="brandLogoRemove">Remove</button>
+          </div>
+        </div>
+        <p class="tiny faint" style="margin:6px 0 0">PNG or JPG. Saved on this device.</p>
+      </div>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn primary" id="brandDone">Done</button>
+      </div>
+    </div>
+  </div>
 
   <div class="foot">Court Sense · runs offline on this device · Phase 1 (organizer tool)</div>
 

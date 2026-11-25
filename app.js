@@ -12,6 +12,7 @@ const DEFAULTS = {
   pairHist: {}, oppHist: {}, lastResults: null, sessionDate: null,
   queue: [], active: [], resting: [], planned: [], planSeq: 0,
   playersSort: { key: "name", dir: 1 }, playerFilter: "all",
+  branding: { name: "", logo: null },
 };
 let S = { players: [] };
 let uiImportOpen = false;
@@ -33,6 +34,7 @@ async function load() {
   S = { players: data.players || [], ...DEFAULTS, ...(data.kv || {}) };
   if (data.kv && data.kv.tierVersion !== 2) S.levelDisplay = "class"; // re-grade to letter system once
   S.tierVersion = 2;
+  S.branding = { name: (S.branding && S.branding.name) || "", logo: (S.branding && S.branding.logo) || null };
   S.pairHist = S.pairHist || {}; S.oppHist = S.oppHist || {};
   S.playersSort = S.playersSort || { key: "name", dir: 1 };
   if (!S.sessionDate) S.sessionDate = todayISO();
@@ -807,6 +809,56 @@ function setView(v) {
   try { location.hash = v; } catch (e) {}
   window.scrollTo({ top: 0, behavior: "instant" });
 }
+/* ---------- branding ---------- */
+function applyBranding() {
+  const name = (S.branding.name || "").trim();
+  const logo = S.branding.logo;
+  const nameEl = document.getElementById("brandName");
+  const ball = document.getElementById("brandBall");
+  if (nameEl) nameEl.textContent = name || "Court Sense";
+  if (ball) {
+    if (logo) { ball.classList.add("haslogo"); ball.innerHTML = `<img src="${logo}" alt="">`; }
+    else { ball.classList.remove("haslogo"); ball.innerHTML = ""; }
+  }
+  try { document.title = name ? `${name} · Court Sense` : "Court Sense"; } catch (e) {}
+}
+function wireBranding() {
+  const modal = document.getElementById("brandingModal");
+  const nameInput = document.getElementById("brandNameInput");
+  const preview = document.getElementById("brandLogoPreview");
+  const fileInput = document.getElementById("brandLogoInput");
+  function renderPreview() {
+    if (S.branding.logo) { preview.classList.remove("empty"); preview.innerHTML = `<img src="${S.branding.logo}" alt="">`; }
+    else { preview.classList.add("empty"); preview.innerHTML = ""; }
+  }
+  const open = () => { nameInput.value = S.branding.name || ""; renderPreview(); modal.hidden = false; };
+  const close = () => { modal.hidden = true; };
+  document.getElementById("settingsBtn").addEventListener("click", open);
+  document.getElementById("brandClose").addEventListener("click", close);
+  document.getElementById("brandDone").addEventListener("click", close);
+  document.getElementById("brandBackdrop").addEventListener("click", close);
+  nameInput.addEventListener("input", () => { S.branding.name = nameInput.value; save(); applyBranding(); });
+  document.getElementById("brandLogoRemove").addEventListener("click", () => { S.branding.logo = null; save(); applyBranding(); renderPreview(); });
+  fileInput.addEventListener("change", e => {
+    const file = e.target.files && e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 256; let w = img.width, h = img.height;
+        const scale = Math.min(1, max / Math.max(w, h)); w = Math.round(w * scale); h = Math.round(h * scale);
+        const c = document.createElement("canvas"); c.width = w; c.height = h;
+        c.getContext("2d").drawImage(img, 0, 0, w, h);
+        try { S.branding.logo = c.toDataURL("image/png"); } catch (err) { S.branding.logo = reader.result; }
+        save(); applyBranding(); renderPreview();
+      };
+      img.onerror = () => { S.branding.logo = reader.result; save(); applyBranding(); renderPreview(); };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  });
+}
 function wireStatic() {
   document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => setView(t.dataset.view)));
   const themeBtn = document.getElementById("themeBtn");
@@ -827,6 +879,8 @@ function wireStatic() {
 (async function boot() {
   await load();
   wireStatic();
+  wireBranding();
+  applyBranding();
   render();
   const start = (location.hash || "").replace("#", "");
   setView(["tonight", "players", "how"].includes(start) ? start : "tonight");
