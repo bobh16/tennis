@@ -57,3 +57,10 @@ drop policy if exists "anon all tournaments"  on tournaments;
 create policy "anon all members"      on members      for all to anon using (true) with check (true);
 create policy "anon all play_results" on play_results for all to anon using (true) with check (true);
 create policy "anon all tournaments"  on tournaments  for all to anon using (true) with check (true);
+
+-- Table privileges for the client roles. Tables created via raw SQL do not get
+-- these automatically, so grant them explicitly (RLS still governs the rows).
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on members, play_results, tournaments to anon, authenticated;
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to anon, authenticated;

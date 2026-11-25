@@ -5,6 +5,7 @@ import {
   applyResult, bestPairing, pickFoursome, makePlayer, parseRoster, samplePlayers,
 } from "./engine.js";
 import { createTournaments } from "./tournaments.js";
+import { syncNow as supaSync } from "./sync.js";
 
 const THEME_KEY = "courtsense_theme";
 const QUEUE_WINDOW = 8; // how far down the queue the auto-matcher looks for a level match
@@ -842,6 +843,8 @@ function wireBranding() {
   document.getElementById("brandClose").addEventListener("click", close);
   document.getElementById("brandDone").addEventListener("click", close);
   document.getElementById("brandBackdrop").addEventListener("click", close);
+  const sync = document.getElementById("syncNow");
+  if (sync) sync.addEventListener("click", doSync);
   nameInput.addEventListener("input", () => { S.branding.name = nameInput.value; save(); applyBranding(); });
   document.getElementById("brandLogoRemove").addEventListener("click", () => { S.branding.logo = null; save(); applyBranding(); renderPreview(); });
   fileInput.addEventListener("change", e => {
@@ -863,6 +866,23 @@ function wireBranding() {
     reader.readAsDataURL(file);
     e.target.value = "";
   });
+}
+async function doSync() {
+  const el = document.getElementById("syncStatus");
+  const btn = document.getElementById("syncNow");
+  if (el) { el.textContent = "Syncing…"; el.style.color = "var(--muted)"; }
+  if (btn) btn.disabled = true;
+  try {
+    const res = await supaSync(S);
+    save();
+    renderTonight(); renderPlayers(); if (Tournaments) Tournaments.render();
+    const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (el) { el.textContent = `Synced · ${res.members} members, ${res.tournaments} tournaments · ${time}`; el.style.color = "var(--good)"; }
+  } catch (e) {
+    if (el) { el.textContent = "Sync failed — " + (e && e.message ? e.message.slice(0, 90) : e); el.style.color = "var(--bad)"; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 function wireStatic() {
   document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => setView(t.dataset.view)));
