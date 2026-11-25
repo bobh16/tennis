@@ -36,7 +36,8 @@ export function createTournaments(ctx) {
   const slotLenMs = t => slotMin(t) * 60000;
   const warmupMin = t => (t && t.warmupMin != null) ? t.warmupMin : 5;
   const breakMin = t => (t && t.breakMin != null) ? t.breakMin : 2;
-  const switchEvery = t => Math.max(1, (t && t.switchEvery) || 2); // switch ends every N games
+  const switchEvery = t => Math.max(1, (t && t.switchEvery) || 3); // switch ends every N points on the running score
+  const targetPts = t => Math.max(2, (t && t.target) || 6); // race to this many points (default 6)
   const fmtDur = ms => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
   /* ---------- live ticking clock (warm-up / break countdowns, match elapsed) ---------- */
@@ -319,13 +320,15 @@ export function createTournaments(ctx) {
       <div class="row wrap" style="gap:14px;align-items:center">
         <label class="divday-lbl tiny muted" title="How many courts are in use">Courts
           <select class="divday" id="sch_courts">${[1,2,3,4,5,6,7,8].map(n => `<option ${n === t.courts ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label class="divday-lbl tiny muted" title="Points needed to win a match (tiebreak at one below)">Race to
+          <input type="number" class="divday" id="sch_target" min="2" max="21" value="${targetPts(t)}" style="width:56px"></label>
         <label class="divday-lbl tiny muted" title="Assumed length of a match, used to estimate times">Match ~mins
           <input type="number" class="divday" id="sch_slot" min="5" max="180" step="5" value="${slotMin(t)}" style="width:66px"></label>
         <label class="divday-lbl tiny muted" title="Warm-up countdown length">Warm-up
           <input type="number" class="divday" id="sch_warm" min="0" max="30" value="${warmupMin(t)}" style="width:56px"></label>
         <label class="divday-lbl tiny muted" title="Break countdown length">Break
           <input type="number" class="divday" id="sch_break" min="0" max="30" value="${breakMin(t)}" style="width:56px"></label>
-        <label class="divday-lbl tiny muted" title="Switch ends after this many games">Switch/games
+        <label class="divday-lbl tiny muted" title="Switch ends after every this many points on the running score">Switch/points
           <input type="number" class="divday" id="sch_switch" min="1" max="12" value="${switchEvery(t)}" style="width:56px"></label>
         <label class="altcheck tiny" title="Rotate divisions so each rests between its matches">
           <input type="checkbox" id="sch_alt" ${alternate ? "checked" : ""}> Alternate divisions on the courts</label>
@@ -392,8 +395,9 @@ export function createTournaments(ctx) {
     // every match, tagged with its division, split into live / finished
     const all = [];
     t.divisions.forEach(d => d.matches.forEach(m => { if (m.a && m.b) all.push({ d, m }); }));
-    // active = on court now: warming up or playing (not finished)
-    const activeOnes = all.filter(x => (x.m.startedAt != null || x.m.warmupStart != null) && x.m.endedAt == null && !x.m.done);
+    // active = on court now: warming up or playing. Stays until the umpire
+    // finishes it (endedAt), even once the score is decided at 6.
+    const activeOnes = all.filter(x => (x.m.startedAt != null || x.m.warmupStart != null) && x.m.endedAt == null);
     const byCourt = {};
     activeOnes.forEach(x => { if (x.m.court) (byCourt[x.m.court] = byCourt[x.m.court] || []).push(x); });
     const unplaced = activeOnes.filter(x => !x.m.court);
@@ -403,8 +407,8 @@ export function createTournaments(ctx) {
       h += courtBoardCard(t, n, here);
     }
     h += `</div>`;
-    // recent results
-    const done = all.filter(x => x.m.endedAt != null || x.m.done)
+    // recent results — only matches actually finished on a court
+    const done = all.filter(x => x.m.endedAt != null)
       .sort((a, b) => (b.m.endedAt || 0) - (a.m.endedAt || 0));
     h += `<div class="stack" style="gap:6px;margin-top:14px"><div class="eyebrow">Recent results</div>`;
     h += done.length ? done.slice(0, 20).map(x => resultRow(x.d, x.m)).join("")
@@ -425,7 +429,7 @@ export function createTournaments(ctx) {
     // Phase 1 — warming up (not started yet)
     if (m.startedAt == null && m.warmupStart != null) {
       const end = m.warmupStart + warmupMin(t) * 60000;
-      return `<div class="court warming">
+      return `<div class="court warming divcard" style="--gbar:var(--t-${gradeKey(d)})">
         <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)}</span></div>
         ${teams}
         <div class="timerbox"><div class="timerlabel">Warm-up left</div>
@@ -437,7 +441,8 @@ export function createTournaments(ctx) {
     }
 
     // Phase 2 — match live
-    const inTiebreak = m.scoreA === 5 && m.scoreB === 5 && !m.done;
+    const tp = targetPts(t);
+    const inTiebreak = m.scoreA === tp - 1 && m.scoreB === tp - 1 && !m.done;
     const gameStep = side => `<div class="livescore"><button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:dec">–</button>` +
       `<span class="sval num">${m["score" + side] == null ? 0 : m["score" + side]}</span>` +
       `<button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:inc">+</button></div>`;
@@ -445,8 +450,9 @@ export function createTournaments(ctx) {
       `<span class="sval num">${m["tb" + side] || 0}</span>` +
       `<button class="sbtn" data-mtb="${d.id}:${m.id}:${side}:inc">+</button></div>`;
     const step = inTiebreak ? tbStep : gameStep;
-    const games = (m.scoreA || 0) + (m.scoreB || 0);
-    const switchNow = !inTiebreak && games > 0 && games % switchEvery(t) === 0;
+    // switch ends every N points of the running score (tiebreak points while in a tiebreak)
+    const pts = inTiebreak ? ((m.tbA || 0) + (m.tbB || 0)) : ((m.scoreA || 0) + (m.scoreB || 0));
+    const switchNow = pts > 0 && pts % switchEvery(t) === 0;
     // break timer (optional, during the match)
     let breakHtml = "";
     if (m.breakStart != null) {
@@ -456,9 +462,9 @@ export function createTournaments(ctx) {
         <button class="btn ghost sm" data-endbreak="${d.id}:${m.id}">End break</button></div>`;
     }
     const cap = inTiebreak
-      ? `<div class="score-cap tbcap">5–5 → Tiebreak · first to 7 points wins the match</div>`
-      : `<div class="score-cap">Race to 6 games · tiebreak at 5–5 · switch ends every ${switchEvery(t)} games</div>`;
-    return `<div class="court${inTiebreak ? " tiebreak" : ""}">
+      ? `<div class="score-cap tbcap">${tp - 1}–${tp - 1} → Tiebreak · first to 7 points wins the match</div>`
+      : `<div class="score-cap">Race to ${tp} · tiebreak at ${tp - 1}–${tp - 1} · switch ends every ${switchEvery(t)} points</div>`;
+    return `<div class="court divcard${inTiebreak ? " tiebreak" : ""}" style="--gbar:var(--t-${gradeKey(d)})">
       <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)}</span>
         <span class="matchclock" data-elapsed="${m.startedAt}" title="Time on court">${fmtDur(Date.now() - m.startedAt)}</span>
         <span class="games-badge">${m.scoreA == null ? 0 : m.scoreA}–${m.scoreB == null ? 0 : m.scoreB}</span></div>
@@ -494,7 +500,7 @@ export function createTournaments(ctx) {
     const rr = t.divisions.filter(d => d.discipline !== undefined);
     const withMatches = t.divisions.filter(d => d.matches.some(m => m.a && m.b));
     if (!withMatches.length) return `<p class="tiny faint" style="margin:0">No matches yet — standings appear once matches are generated and scored.</p>`;
-    return withMatches.map(d => `<div class="card pad"><div class="divtitle" style="margin-bottom:2px">${divLabel(d)}</div>` +
+    return withMatches.map(d => `<div class="card pad divcard" style="--gbar:var(--t-${gradeKey(d)})"><div class="divtitle" style="margin-bottom:2px">${divLabel(d)}</div>` +
       (t.type === "elimination" ? bracketStandingNote(d) : standingsHtml(d)) + `</div>`).join("");
   }
   function bracketStandingNote(d) {
@@ -521,10 +527,11 @@ export function createTournaments(ctx) {
         : `<p class="tiny faint" style="margin:0">Pick formats and grades, add them to the list (stack as many batches as you like), then create them all. Duplicates are skipped.</p>`}
     </div>`;
   }
+  const gradeKey = d => ((d.grade && d.grade[0]) || "d").toLowerCase();
   function divisionHtml(t, d, offDay) {
     const day = dayOf(d);
     const callTxt = d.callTime ? ` · call ${fmtClock(Date.parse(`${day}T${d.callTime}:00`))}` : "";
-    let h = `<div class="card pad${offDay ? " offday" : ""}" data-div="${d.id}">
+    let h = `<div class="card pad divcard${offDay ? " offday" : ""}" data-div="${d.id}" style="--gbar:var(--t-${gradeKey(d)})">
       ${offDay ? `<div class="offday-tag tiny">Not playing today — plays ${weekdayOf(day)}</div>` : ""}
       <div class="row spread" style="align-items:flex-start;gap:8px">
         <div><div class="divtitle">${divLabel(d)}</div>
@@ -892,11 +899,13 @@ export function createTournaments(ctx) {
   function setScore(divId, matchId, side, val) {
     const t = findT(openId), d = findDiv(divId); if (!d) return;
     const m = d.matches.find(x => x.id === matchId); if (!m) return;
+    const tp = targetPts(t);
     m["score" + side] = val === "" ? null : Math.max(0, Math.min(99, parseInt(val, 10) || 0));
-    m.done = m.scoreA != null && m.scoreB != null && m.scoreA !== m.scoreB;
+    m.done = m.scoreA != null && m.scoreB != null && (m.scoreA >= tp || m.scoreB >= tp) && m.scoreA !== m.scoreB;
     if (t && t.type === "elimination") { m.winner = m.done ? (m.scoreA > m.scoreB ? m.a : m.b) : null; advanceBracket(d); }
     ctx.save(); render();
   }
+  function setTarget(n) { const t = findT(openId); if (!t) return; t.target = Math.max(2, Math.min(21, parseInt(n, 10) || 6)); ctx.save(); render(); }
   function setDivDay(divId, val) {
     const d = findDiv(divId); if (!d) return;
     d.day = val || null; ctx.save(); render();
@@ -938,33 +947,35 @@ export function createTournaments(ctx) {
   }
   function setWarmupMin(n) { const t = findT(openId); if (!t) return; t.warmupMin = Math.max(0, Math.min(30, parseInt(n, 10) || 0)); ctx.save(); render(); }
   function setBreakMin(n) { const t = findT(openId); if (!t) return; t.breakMin = Math.max(0, Math.min(30, parseInt(n, 10) || 0)); ctx.save(); render(); }
-  function setSwitchEvery(n) { const t = findT(openId); if (!t) return; t.switchEvery = Math.max(1, Math.min(12, parseInt(n, 10) || 2)); ctx.save(); render(); }
+  function setSwitchEvery(n) { const t = findT(openId); if (!t) return; t.switchEvery = Math.max(1, Math.min(12, parseInt(n, 10) || 3)); ctx.save(); render(); }
   function stepScore(divId, matchId, side, dir) {
     const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
+    const tp = targetPts(t);
     const cur = m["score" + side] == null ? 0 : m["score" + side];
     let next = Math.max(0, Math.min(99, cur + (dir === "inc" ? 1 : -1)));
-    // games stop at 5 while the other side is on 5 — the tiebreak decides the 6th game
+    // points stop at tp-1 while the other side is on tp-1 — the tiebreak decides it
     const other = side === "A" ? (m.scoreB || 0) : (m.scoreA || 0);
-    if (dir === "inc" && next > 5 && other === 5) next = 5;
+    if (dir === "inc" && next >= tp && other === tp - 1) next = tp - 1;
     m["score" + side] = next;
-    m.done = m.scoreA != null && m.scoreB != null && m.scoreA !== m.scoreB;
+    // decided only when someone reaches the target with a lead (not at every unequal score)
+    m.done = m.scoreA != null && m.scoreB != null && (m.scoreA >= tp || m.scoreB >= tp) && m.scoreA !== m.scoreB;
     if (t && t.type === "elimination") { m.winner = m.done ? (m.scoreA > m.scoreB ? m.a : m.b) : null; advanceBracket(d); }
     ctx.save(); render();
   }
-  // 5–5 tiebreak: straight points to 7, first to 7 takes the match 6–5.
+  // (tp-1)-all tiebreak: straight points to 7, first to 7 takes the match tp–(tp-1).
   function stepTiebreak(divId, matchId, side, dir) {
     const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
+    const tp = targetPts(t);
     m.tbA = m.tbA || 0; m.tbB = m.tbB || 0;
     m["tb" + side] = Math.max(0, (m["tb" + side] || 0) + (dir === "inc" ? 1 : -1));
     if (m.tbA >= 7 || m.tbB >= 7) {
-      // first to 7 wins the match 6–5
-      if (m.tbA > m.tbB) { m.scoreA = 6; m.scoreB = 5; } else { m.scoreB = 6; m.scoreA = 5; }
+      if (m.tbA > m.tbB) { m.scoreA = tp; m.scoreB = tp - 1; } else { m.scoreB = tp; m.scoreA = tp - 1; }
       m.done = true;
       if (!m.startedAt) m.startedAt = Date.now();
       if (!m.endedAt) m.endedAt = Date.now();
     } else {
-      // corrected back below 7 — reopen the match at 5–5
-      if (m.scoreA === 6 || m.scoreB === 6) { m.scoreA = 5; m.scoreB = 5; m.endedAt = null; }
+      // corrected back below 7 — reopen the match at (tp-1)-all
+      if (m.scoreA >= tp || m.scoreB >= tp) { m.scoreA = tp - 1; m.scoreB = tp - 1; m.endedAt = null; }
       m.done = false;
     }
     if (t && t.type === "elimination") { m.winner = m.done ? (m.scoreA > m.scoreB ? m.a : m.b) : null; advanceBracket(d); }
@@ -1053,6 +1064,7 @@ export function createTournaments(ctx) {
     const sc = q("#sch_courts"); if (sc) sc.addEventListener("change", () => setCourts(sc.value));
     const sa = q("#sch_alt"); if (sa) sa.addEventListener("change", () => setAlternate(sa.checked));
     const ss = q("#sch_slot"); if (ss) ss.addEventListener("change", () => setSlot(ss.value));
+    const stg = q("#sch_target"); if (stg) stg.addEventListener("change", () => setTarget(stg.value));
     const sw = q("#sch_warm"); if (sw) sw.addEventListener("change", () => setWarmupMin(sw.value));
     const sb2 = q("#sch_break"); if (sb2) sb2.addEventListener("change", () => setBreakMin(sb2.value));
     const sv = q("#sch_switch"); if (sv) sv.addEventListener("change", () => setSwitchEvery(sv.value));

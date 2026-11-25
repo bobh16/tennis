@@ -404,6 +404,10 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .court.warming{border-color:#e8a33d;box-shadow:0 0 0 2px color-mix(in srgb,#e8a33d 25%,transparent)}
 .switchnote{text-align:center;font-weight:800;font-size:12px;color:var(--court);
   background:color-mix(in srgb,var(--court) 12%,transparent);border-radius:8px;padding:4px;margin:2px 0}
+/* grade-coloured header bar on division-scoped cards */
+.divcard{position:relative;overflow:hidden}
+.divcard::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;background:var(--gbar,var(--border))}
+.gradedot{display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--gbar);margin-right:6px;vertical-align:middle;flex:none}
 
 /* home dashboard + section sub-nav */
 nav.subnav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 58px);z-index:25;background:var(--court);box-shadow:var(--shadow)}
