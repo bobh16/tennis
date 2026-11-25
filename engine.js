@@ -36,8 +36,8 @@ const pk = (a, b) => [a, b].sort().join("|");
 export function applyResult(court, players, round, pairHist, oppHist) {
   const byId = id => players.find(p => p.id === id);
   const A = court.teamA.map(byId), B = court.teamB.map(byId);
-  const aAvg = (A[0].rating + A[1].rating) / 2;
-  const bAvg = (B[0].rating + B[1].rating) / 2;
+  const aAvg = A.reduce((s, p) => s + p.rating, 0) / A.length;
+  const bAvg = B.reduce((s, p) => s + p.rating, 0) / B.length;
   const expA = expected(aAvg, bAvg), expB = 1 - expA;
   const tot = court.scoreA + court.scoreB;
   const actA = tot === 0 ? 0.5 : court.scoreA / tot, actB = 1 - actA;
@@ -59,7 +59,8 @@ export function applyResult(court, players, round, pairHist, oppHist) {
   A.forEach(p => upd(p, expA, actA, aWon));
   B.forEach(p => upd(p, expB, actB, !aWon));
   const bump = (map, a, b) => { const k = pk(a, b); map[k] = (map[k] || 0) + 1; };
-  bump(pairHist, A[0].id, A[1].id); bump(pairHist, B[0].id, B[1].id);
+  if (A.length > 1) bump(pairHist, A[0].id, A[1].id);
+  if (B.length > 1) bump(pairHist, B[0].id, B[1].id);
   for (const a of court.teamA) for (const b of court.teamB) bump(oppHist, a, b);
   return changes;
 }
@@ -85,6 +86,10 @@ export function generateRound(present, courtsAvail, round, pairHist, oppHist) {
 // Of the 3 ways to split 4 players into 2 teams, pick the most balanced,
 // breaking ties toward fresh partner/opponent combinations.
 export function bestPairing(four, courtNo, pairHist, oppHist) {
+  // Singles: two players, one per side — nothing to optimise.
+  if (four.length === 2) {
+    return { court: courtNo, teamA: [four[0].id], teamB: [four[1].id], scoreA: 0, scoreB: 0 };
+  }
   const combos = [[[0, 1], [2, 3]], [[0, 2], [1, 3]], [[0, 3], [1, 2]]];
   let best = null, bestCost = 1e9;
   for (const [tA, tB] of combos) {
@@ -107,14 +112,19 @@ export function bestPairing(four, courtNo, pairHist, oppHist) {
 // waited longest (front of queue) always plays, plus the three nearest to them
 // in level from a window near the front — so matches stay level-similar without
 // letting someone far back jump the line. Returns an array of 4 ids, or null.
-export function pickFoursome(queue, getPlayer, windowSize = 8) {
-  if (queue.length < 4) return null;
+export function pickGroup(queue, getPlayer, size = 4, windowSize = 8) {
+  if (queue.length < size) return null;
+  const need = size - 1;
   const anchorId = queue[0];
   const anchor = getPlayer(anchorId);
-  const pool = queue.slice(1, 1 + Math.max(3, windowSize))
+  const pool = queue.slice(1, 1 + Math.max(need, windowSize))
     .map(id => ({ id, p: getPlayer(id) }))
     .sort((a, b) => Math.abs(a.p.rating - anchor.rating) - Math.abs(b.p.rating - anchor.rating));
-  return [anchorId, pool[0].id, pool[1].id, pool[2].id];
+  return [anchorId, ...pool.slice(0, need).map(x => x.id)];
+}
+// Back-compat alias — a foursome is just a group of four.
+export function pickFoursome(queue, getPlayer, windowSize = 8) {
+  return pickGroup(queue, getPlayer, 4, windowSize);
 }
 
 let idCounter = 0;
