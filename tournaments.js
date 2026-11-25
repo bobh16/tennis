@@ -515,6 +515,11 @@ export function createTournaments(ctx) {
       });
     }
   }
+  // Round-robin tiebreakers, in tennis order:
+  //   1) wins  2) head-to-head among the tied  3) games (sets) quotient
+  //   4) once a tie is reduced to two, back to head-to-head.
+  // The resolver is recursive so a group broken apart by quotient is re-judged
+  // on head-to-head, exactly as the two-player rule requires.
   function standings(d) {
     const table = {};
     d.teams.forEach(tm => table[tm.id] = { team: tm, w: 0, l: 0, gf: 0, ga: 0, played: 0 });
@@ -525,9 +530,41 @@ export function createTournaments(ctx) {
       A.played++; B.played++;
       if (m.scoreA > m.scoreB) { A.w++; B.l++; } else { B.w++; A.l++; }
     });
-    const rows = Object.values(table).map(r => ({ ...r, q: r.ga > 0 ? r.gf / r.ga : (r.gf > 0 ? Infinity : 0) }));
-    rows.sort((x, y) => (y.w - x.w) || (y.q - x.q) || (y.gf - x.gf));
-    return rows;
+    Object.values(table).forEach(r => { r.q = r.ga > 0 ? r.gf / r.ga : (r.gf > 0 ? Infinity : 0); });
+    const beat = (a, b) => { const m = d.matches.find(x => x.done && ((x.a === a && x.b === b) || (x.a === b && x.b === a))); if (!m) return false; return (m.scoreA > m.scoreB ? m.a : m.b) === a; };
+    const groupBy = (arr, fn) => { const m = new Map(); arr.forEach(x => { const k = fn(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); return m; };
+    const qnum = k => (k === "inf" ? Infinity : parseFloat(k));
+    function breakTie(ids) {
+      if (ids.length <= 1) return ids.slice();
+      if (ids.length === 2) {
+        const [a, b] = ids;
+        if (beat(a, b)) return [a, b];
+        if (beat(b, a)) return [b, a];
+        return table[a].q >= table[b].q ? [a, b] : [b, a];
+      }
+      // head-to-head mini-record within the tied group
+      const miniW = new Map(ids.map(id => [id, 0]));
+      for (const a of ids) for (const b of ids) if (a !== b && beat(a, b)) miniW.set(a, miniW.get(a) + 1);
+      const miniTiers = groupBy(ids, id => miniW.get(id));
+      if (miniTiers.size > 1) {
+        let out = [];
+        [...miniTiers.keys()].sort((a, b) => b - a).forEach(v => out = out.concat(breakTie(miniTiers.get(v))));
+        return out;
+      }
+      // circular tie → separate by quotient, then re-judge each subgroup on head-to-head
+      const qTiers = groupBy(ids, id => table[id].q === Infinity ? "inf" : table[id].q.toFixed(4));
+      if (qTiers.size > 1) {
+        let out = [];
+        [...qTiers.keys()].sort((x, y) => qnum(y) - qnum(x)).forEach(k => { const sub = qTiers.get(k); out = out.concat(sub.length > 1 ? breakTie(sub) : sub); });
+        return out;
+      }
+      return ids.slice().sort((a, b) => table[b].gf - table[a].gf);
+    }
+    // rank by wins first, then break each win-tier with the recursive resolver
+    const winTiers = groupBy(d.teams.map(t => t.id), id => table[id].w);
+    let ordered = [];
+    [...winTiers.keys()].sort((a, b) => b - a).forEach(v => ordered = ordered.concat(breakTie(winTiers.get(v))));
+    return ordered.map(id => table[id]);
   }
   function roundLabel(r, total) {
     if (r === total) return "Final";
@@ -578,7 +615,7 @@ export function createTournaments(ctx) {
   function standingsHtml(d) {
     const rows = standings(d);
     let h = `<div class="eyebrow" style="margin-top:14px;margin-bottom:6px">Standings
-      <span class="infobtn" title="Ranked by wins, then quotient (games won ÷ games lost)" style="cursor:default">i</span></div>
+      <span class="infobtn" title="Wins, then head-to-head among tied teams, then quotient (games won ÷ games lost); once a tie is down to two it's head-to-head again" style="cursor:default">i</span></div>
       <div class="tablewrap"><table class="today"><thead><tr><th>#</th><th>Team</th><th class="r">W–L</th><th class="r">Games</th><th class="r">Quotient</th></tr></thead><tbody>`;
     h += rows.map((r, i) => `<tr><td class="num">${i + 1}</td><td>${teamName(d, r.team.id)}</td>` +
       `<td class="r num">${r.w}–${r.l}</td><td class="r num">${r.gf}–${r.ga}</td>` +
