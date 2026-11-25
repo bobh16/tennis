@@ -5,7 +5,7 @@ import {
   applyResult, bestPairing, pickFoursome, makePlayer, parseRoster, samplePlayers,
 } from "./engine.js";
 import { createTournaments } from "./tournaments.js";
-import { syncNow as supaSync } from "./sync.js";
+import { syncNow as supaSync, configured as supaConfigured } from "./sync.js";
 
 const THEME_KEY = "courtsense_theme";
 const QUEUE_WINDOW = 8; // how far down the queue the auto-matcher looks for a level match
@@ -14,7 +14,7 @@ const DEFAULTS = {
   pairHist: {}, oppHist: {}, lastResults: null, sessionDate: null,
   queue: [], active: [], resting: [], planned: [], planSeq: 0,
   playersSort: { key: "name", dir: 1 }, playerFilter: "all",
-  branding: { name: "", logo: null }, tournaments: [],
+  branding: { name: "", logo: null }, tournaments: [], liveSync: false,
 };
 let S = { players: [] };
 let uiImportOpen = false;
@@ -1032,6 +1032,12 @@ function wireBranding() {
   document.getElementById("brandBackdrop").addEventListener("click", close);
   const sync = document.getElementById("syncNow");
   if (sync) sync.addEventListener("click", doSync);
+  const live = document.getElementById("liveSyncToggle");
+  if (live) {
+    live.checked = !!S.liveSync;
+    live.disabled = !supaConfigured();
+    live.addEventListener("change", () => setLiveSync(live.checked));
+  }
   nameInput.addEventListener("input", () => { S.branding.name = nameInput.value; save(); applyBranding(); });
   document.getElementById("brandLogoRemove").addEventListener("click", () => { S.branding.logo = null; save(); applyBranding(); renderPreview(); });
   fileInput.addEventListener("change", e => {
@@ -1071,6 +1077,44 @@ async function doSync() {
     if (btn) btn.disabled = false;
   }
 }
+
+/* ---------- live sync (continuous, collaborative) ---------- */
+const LIVE_SYNC_MS = 4000;
+let liveTimer = null, liveBusy = false, livePendingRender = false;
+function liveStatus(text, color) { const el = document.getElementById("syncStatus"); if (el) { el.textContent = text; el.style.color = color || "var(--muted)"; } }
+function editingTournament() {
+  const a = document.activeElement;
+  return a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && V.tournaments.contains(a);
+}
+async function liveTick() {
+  if (liveBusy) return;
+  if (!navigator.onLine) { liveStatus("Offline — will sync when back online", "var(--muted)"); return; }
+  liveBusy = true;
+  try {
+    const res = await supaSync(S);
+    save();
+    if (res.changed || livePendingRender) {
+      if (editingTournament()) { livePendingRender = true; }       // don't yank a field mid-edit
+      else { livePendingRender = false; renderTonight(); renderPlayers(); if (Tournaments) Tournaments.render(); }
+    }
+    const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    liveStatus(`Live · in sync · ${time}`, "var(--good)");
+  } catch (e) {
+    liveStatus("Sync paused — " + (e && e.message ? e.message.slice(0, 70) : e), "var(--bad)");
+  } finally {
+    liveBusy = false;
+  }
+}
+function startLiveSync() {
+  if (liveTimer || !supaConfigured()) return;
+  liveTick();
+  liveTimer = setInterval(liveTick, LIVE_SYNC_MS);
+}
+function stopLiveSync() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
+function setLiveSync(on) {
+  S.liveSync = !!on; save();
+  if (on) startLiveSync(); else { stopLiveSync(); liveStatus("Live sync off", "var(--muted)"); }
+}
 function wireStatic() {
   document.getElementById("homeBtn").addEventListener("click", () => setView("home"));
   const brand = document.querySelector("header .brand");
@@ -1099,4 +1143,7 @@ function wireStatic() {
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }
+  if (S.liveSync && supaConfigured()) startLiveSync();
+  window.addEventListener("online", () => { if (S.liveSync) startLiveSync(); });
+  window.addEventListener("offline", () => liveStatus("Offline — will sync when back online", "var(--muted)"));
 })();

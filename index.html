@@ -70,7 +70,9 @@
           <button class="btn sm primary" id="syncNow">Sync now</button>
           <span class="tiny muted" id="syncStatus">Not synced yet</span>
         </div>
-        <p class="tiny faint" style="margin:6px 0 0">Uploads your roster and tournaments and pulls any changes. Needs internet; the app still works offline.</p>
+        <label class="altcheck tiny" style="margin-top:8px" title="Keep this device in sync automatically so two or more people can edit at once">
+          <input type="checkbox" id="liveSyncToggle"> Live sync — keep in sync automatically (for two or more people)</label>
+        <p class="tiny faint" style="margin:6px 0 0">Uploads your roster and tournaments and pulls any changes every few seconds. A schedule edit and a score edit merge instead of overwriting. Needs internet; the app still works offline.</p>
       </div>
       <div class="row" style="justify-content:flex-end">
         <button class="btn primary" id="brandDone">Done</button>
