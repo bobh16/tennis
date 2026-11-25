@@ -4,6 +4,7 @@ import {
   TIERS, tierOf, relLabel, relClass,
   applyResult, bestPairing, pickFoursome, makePlayer, parseRoster, samplePlayers,
 } from "./engine.js";
+import { createTournaments } from "./tournaments.js";
 
 const THEME_KEY = "courtsense_theme";
 const QUEUE_WINDOW = 8; // how far down the queue the auto-matcher looks for a level match
@@ -12,11 +13,12 @@ const DEFAULTS = {
   pairHist: {}, oppHist: {}, lastResults: null, sessionDate: null,
   queue: [], active: [], resting: [], planned: [], planSeq: 0,
   playersSort: { key: "name", dir: 1 }, playerFilter: "all",
-  branding: { name: "", logo: null },
+  branding: { name: "", logo: null }, tournaments: [],
 };
 let S = { players: [] };
 let uiImportOpen = false;
 let editCourt = null; // id of the court currently being edited (swap players)
+let Tournaments = null; // tournaments module instance
 
 /* ---------- dates ---------- */
 function todayISO() {
@@ -89,6 +91,7 @@ function tierLegendHtml() {
 const V = {
   tonight: document.getElementById("view-tonight"),
   players: document.getElementById("view-players"),
+  tournaments: document.getElementById("view-tournaments"),
   how: document.getElementById("view-how"),
 };
 function render() { renderTonight(); renderPlayers(); }
@@ -575,6 +578,7 @@ function renderPlayers() {
     <form class="card pad row wrap" id="addForm" hidden style="gap:10px;align-items:flex-end">
       <label class="field grow">Name<input type="text" id="np_name" placeholder="e.g. Alex M." autocomplete="off"></label>
       <label class="field">Starting level<input type="number" id="np_lvl" value="3.50" step="0.05" min="1.5" max="6" style="width:112px"></label>
+      <label class="field">Gender<select id="np_gender"><option value="">—</option><option value="f">Women</option><option value="m">Men</option></select></label>
       <button class="btn primary" type="submit">Add player</button>
       <button class="btn ghost" type="button" id="np_cancel">Cancel</button>
     </form>`;
@@ -789,7 +793,7 @@ function wirePlayers() {
     const name = el.querySelector("#np_name").value.trim();
     if (!name) return;
     const r = parseFloat(el.querySelector("#np_lvl").value) || 3.5;
-    S.players.push(makePlayer(name, r));
+    S.players.push(makePlayer(name, r, el.querySelector("#np_gender").value || null));
     save(); renderPlayers(); renderTonight();
   });
   el.querySelector("#clearAll").addEventListener("click", async () => {
@@ -806,6 +810,7 @@ function setView(v) {
   document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", t.dataset.view === v));
   if (v === "how") renderHow();
   if (v === "players") renderPlayers();
+  if (v === "tournaments" && Tournaments) Tournaments.render();
   try { location.hash = v; } catch (e) {}
   window.scrollTo({ top: 0, behavior: "instant" });
 }
@@ -881,9 +886,10 @@ function wireStatic() {
   wireStatic();
   wireBranding();
   applyBranding();
+  Tournaments = createTournaments({ mount: V.tournaments, state: S, save, byId, tierChip });
   render();
   const start = (location.hash || "").replace("#", "");
-  setView(["tonight", "players", "how"].includes(start) ? start : "tonight");
+  setView(["tonight", "players", "tournaments", "how"].includes(start) ? start : "tonight");
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }

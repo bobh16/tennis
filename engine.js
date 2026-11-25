@@ -118,12 +118,12 @@ export function pickFoursome(queue, getPlayer, windowSize = 8) {
 }
 
 let idCounter = 0;
-export function makePlayer(name, rating = 3.5) {
+export function makePlayer(name, rating = 3.5, gender = null) {
   idCounter++;
   const r = Math.max(1.5, Math.min(6, rating));
   return {
     id: "p" + Date.now().toString(36) + "-" + idCounter.toString(36),
-    name: name.trim(), rating: Math.round(r * 100) / 100, reliability: 0,
+    name: name.trim(), rating: Math.round(r * 100) / 100, gender, reliability: 0,
     games: 0, wins: 0, losses: 0, present: false, arr: 0, gamesTonight: 0, lastRound: -99, delta: 0,
   };
 }
@@ -157,7 +157,7 @@ export function samplePlayers() {
   for (let i = 0; i < 28; i++) {
     const r = Math.round((2.6 + Math.random() * 2.2) * 100) / 100;
     const games = Math.floor(5 + Math.random() * 45);
-    const p = makePlayer(FIRST[i] + " " + LAST[i][0] + ".", r);
+    const p = makePlayer(FIRST[i] + " " + LAST[i][0] + ".", r, Math.random() < 0.5 ? "f" : "m");
     p.games = games;
     p.reliability = Math.min(REL_CAP, games / (games + REL_SOFT));
     p.wins = Math.round(games * (0.35 + Math.random() * 0.3));
