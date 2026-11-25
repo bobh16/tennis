@@ -2,7 +2,7 @@
 // Network-first for our own files so updates always show when online, with a
 // cache fallback so the app still runs offline at the court. Bump CACHE to
 // force older installs to drop their old cache.
-const CACHE = "court-sense-v4";
+const CACHE = "court-sense-v5";
 const ASSETS = [
   "./",
   "index.html",

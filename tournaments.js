@@ -28,6 +28,58 @@ export function createTournaments(ctx) {
   const teamSize = d => d.discipline === "singles" ? 1 : 2;
   const gradeOf = pid => { const p = ctx.byId(pid); return p ? tierOf(p.rating).cls : "—"; };
   const fmtDate = s => { try { return new Date(s + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (e) { return s; } };
+  const weekdayOf = s => { try { return new Date(s + "T12:00:00").toLocaleDateString(undefined, { weekday: "long" }); } catch (e) { return ""; } };
+
+  /* ---------- scheduling ---------- */
+  const DEFAULT_SLOT_MIN = 20; // fallback match length before any finish-times exist
+  const dayOf = d => d.day || (findT(openId) || {}).startDate || new Date().toISOString().slice(0, 10);
+  const fmtClock = ms => { if (ms == null) return ""; try { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } };
+  const matchDurMin = m => (m.startedAt != null && m.endedAt != null) ? Math.max(1, Math.round((m.endedAt - m.startedAt) / 60000)) : null;
+  function avgDurMin(t) {
+    let tot = 0, n = 0;
+    t.divisions.forEach(d => d.matches.forEach(m => { const dm = matchDurMin(m); if (dm) { tot += dm; n++; } }));
+    return n ? Math.round(tot / n) : DEFAULT_SLOT_MIN;
+  }
+  function slotMs(m, d) {
+    if (!m.slotTime) return null;
+    const t = Date.parse(`${dayOf(d)}T${m.slotTime}:00`);
+    return isNaN(t) ? null : t;
+  }
+  // Predict a start time + court for every schedulable match not yet started.
+  function predictSchedule(t, d) {
+    const avg = avgDurMin(t) * 60000;
+    const courts = Math.max(1, t.courts || 1);
+    const now = Date.now();
+    const free = new Array(courts).fill(now);
+    // in-progress matches hold a court until their predicted end
+    d.matches.filter(m => m.startedAt != null && m.endedAt == null && m.a && m.b)
+      .forEach((m, i) => { if (i < courts) free[i] = Math.max(free[i], m.startedAt + avg); });
+    const pending = d.matches.filter(m => m.a && m.b && m.startedAt == null && m.endedAt == null)
+      .sort((x, y) => ((slotMs(x, d) || 0) - (slotMs(y, d) || 0)) || (x.round - y.round) || (x.slot - y.slot));
+    const pred = new Map();
+    pending.forEach(m => {
+      let ci = 0; for (let i = 1; i < courts; i++) if (free[i] < free[ci]) ci = i;
+      let start = Math.max(free[ci], now);
+      const st = slotMs(m, d); if (st != null) start = Math.max(start, st);
+      pred.set(m.id, { startMs: start, court: ci + 1 });
+      free[ci] = start + avg;
+    });
+    return pred;
+  }
+  function nextUpLine(d, pred) {
+    const live = d.matches.filter(m => m.startedAt != null && m.endedAt == null && m.a && m.b).length;
+    let soonest = null;
+    pred.forEach((p, id) => { if (!soonest || p.startMs < soonest.startMs) soonest = { ...p, id }; });
+    if (!soonest && !live) return "";
+    const parts = [];
+    if (live) parts.push(`${live} on court now`);
+    if (soonest) {
+      const m = d.matches.find(x => x.id === soonest.id);
+      const who = m ? `${teamName(d, m.a)} vs ${teamName(d, m.b)}` : "next match";
+      parts.push(`next up <b>~${fmtClock(soonest.startMs)}</b> on Court ${soonest.court} — ${who}`);
+    }
+    return `<p class="tiny muted schednote" style="margin:0 0 8px">${parts.join(" · ")}</p>`;
+  }
 
   let openId = null, newOpen = false, build = null; // build = { divisionId, slots: [playerId|null,…] }
   let pf = new Set(), pg = new Set(), draft = new Map(); // division batch builder: formats, grades, staged divisions
@@ -121,11 +173,16 @@ export function createTournaments(ctx) {
     </div>`;
   }
   function divisionHtml(t, d) {
+    const day = dayOf(d);
     let h = `<div class="card pad" data-div="${d.id}">
-      <div class="row spread" style="align-items:flex-start">
+      <div class="row spread" style="align-items:flex-start;gap:8px">
         <div><div class="divtitle">${divLabel(d)}</div>
-          <div class="tiny muted">${d.teams.length} ${teamSize(d) === 1 ? "player" : "team"}${d.teams.length !== 1 ? "s" : ""}</div></div>
-        <button class="qbtn qx" data-deldiv="${d.id}" title="Remove division">×</button>
+          <div class="tiny muted">${d.teams.length} ${teamSize(d) === 1 ? "player" : "team"}${d.teams.length !== 1 ? "s" : ""} · ${weekdayOf(day)}</div></div>
+        <div class="row" style="gap:6px;align-items:center;flex:none">
+          <label class="divday-lbl tiny muted" title="Day this division plays">${weekdayOf(day).slice(0,3)}
+            <input type="date" class="divday" data-divday="${d.id}" value="${day}" min="${t.startDate}" max="${t.endDate}"></label>
+          <button class="qbtn qx" data-deldiv="${d.id}" title="Remove division">×</button>
+        </div>
       </div>`;
     if (d.teams.length) h += `<div class="stack" style="gap:6px;margin-top:10px">` + d.teams.map((tm, i) => teamRow(d, tm, i)).join("") + `</div>`;
     h += teamBuilderHtml(d);
@@ -209,7 +266,7 @@ export function createTournaments(ctx) {
     if (r === total - 2) return "Quarterfinals";
     return "Round " + r;
   }
-  function matchRow(d, m) {
+  function matchRow(d, m, t, pred) {
     const scorable = m.a && m.b;
     const aName = m.a ? teamName(d, m.a) : (m.b ? "(bye)" : "TBD");
     const bName = m.b ? teamName(d, m.b) : (m.a ? "(bye)" : "TBD");
@@ -222,7 +279,26 @@ export function createTournaments(ctx) {
       <span class="faint mono">–</span>
       ${scorable ? inp("B") : `<span class="faint mono">–</span>`}
       <span class="mt end ${bw ? "win" : ""}">${bName}</span>
-    </div>`;
+    </div>${scorable ? schedLine(d, m, t, pred) : ""}`;
+  }
+  function schedLine(d, m, t, pred) {
+    const courts = Math.max(1, t.courts || 1);
+    const courtSel = `<select class="mctrl mcourt" data-court="${d.id}:${m.id}"><option value="">Court —</option>` +
+      Array.from({ length: courts }, (_, i) => `<option value="${i + 1}" ${m.court === i + 1 ? "selected" : ""}>Court ${i + 1}</option>`).join("") + `</select>`;
+    const timeInp = `<input type="time" class="mctrl mtime" data-slottime="${d.id}:${m.id}" value="${m.slotTime || ""}">`;
+    let state;
+    if (m.startedAt == null) {
+      const p = pred && pred.get(m.id);
+      const eta = p ? `<span class="meta-eta">~${fmtClock(p.startMs)}${m.court ? "" : ` · Court ${p.court}`}</span>` : "";
+      state = `<button class="btn sm mstart" data-startmatch="${d.id}:${m.id}">Start</button>${eta}`;
+    } else if (m.endedAt == null) {
+      state = `<span class="mlive">● started ${fmtClock(m.startedAt)}</span>` +
+        `<button class="btn sm primary mfinish" data-finishmatch="${d.id}:${m.id}">Finish</button>`;
+    } else {
+      state = `<span class="mdone-t">${fmtClock(m.startedAt)}–${fmtClock(m.endedAt)} · ${matchDurMin(m)}m</span>` +
+        `<button class="iconbtn mreset" data-resettime="${d.id}:${m.id}" title="Clear times">↺</button>`;
+    }
+    return `<div class="msched">${courtSel}${timeInp}${state}</div>`;
   }
   function standingsHtml(d) {
     const rows = standings(d);
@@ -238,10 +314,12 @@ export function createTournaments(ctx) {
   function bracketHtml(t, d) {
     const rounds = [...new Set(d.matches.map(m => m.round))].sort((a, b) => a - b);
     const total = rounds.length;
+    const pred = predictSchedule(t, d);
     let h = `<div class="eyebrow" style="margin-top:14px;margin-bottom:6px">Bracket</div>`;
+    h += nextUpLine(d, pred);
     rounds.forEach(r => {
       h += `<div class="tiny muted" style="margin:8px 0 4px;font-weight:700">${roundLabel(r, total)}</div><div class="stack" style="gap:6px">`;
-      h += d.matches.filter(m => m.round === r).sort((a, b) => a.slot - b.slot).map(m => matchRow(d, m)).join("");
+      h += d.matches.filter(m => m.round === r).sort((a, b) => a.slot - b.slot).map(m => matchRow(d, m, t, pred)).join("");
       h += `</div>`;
     });
     const finalM = d.matches.find(m => m.round === total);
@@ -257,8 +335,11 @@ export function createTournaments(ctx) {
       return `<button class="btn primary sm" data-genmatches="${d.id}" style="margin-top:12px">${label}</button>`;
     }
     if (t.type === "elimination") return bracketHtml(t, d);
-    let h = `<div class="eyebrow" style="margin-top:14px;margin-bottom:6px">Matches</div><div class="stack" style="gap:6px">`;
-    h += d.matches.map(m => matchRow(d, m)).join("");
+    const pred = predictSchedule(t, d);
+    let h = `<div class="eyebrow" style="margin-top:14px;margin-bottom:6px">Matches</div>`;
+    h += nextUpLine(d, pred);
+    h += `<div class="stack" style="gap:6px">`;
+    h += d.matches.map(m => matchRow(d, m, t, pred)).join("");
     h += `</div><button class="btn ghost sm" data-regen="${d.id}" style="margin-top:8px">Regenerate</button>`;
     h += standingsHtml(d);
     return h;
@@ -390,6 +471,32 @@ export function createTournaments(ctx) {
     if (t && t.type === "elimination") { m.winner = m.done ? (m.scoreA > m.scoreB ? m.a : m.b) : null; advanceBracket(d); }
     ctx.save(); render();
   }
+  function setDivDay(divId, val) {
+    const d = findDiv(divId); if (!d) return;
+    d.day = val || null; ctx.save(); render();
+  }
+  function findMatch(divId, matchId) { const d = findDiv(divId); return d && d.matches.find(x => x.id === matchId); }
+  function setCourt(divId, matchId, val) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    m.court = val === "" ? null : parseInt(val, 10); ctx.save(); render();
+  }
+  function setSlotTime(divId, matchId, val) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    m.slotTime = val || null; ctx.save(); render();
+  }
+  function startStamp(divId, matchId) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    m.startedAt = Date.now(); m.endedAt = null; ctx.save(); render();
+  }
+  function finishStamp(divId, matchId) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    if (m.startedAt == null) m.startedAt = Date.now();
+    m.endedAt = Date.now(); ctx.save(); render();
+  }
+  function resetStamp(divId, matchId) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    m.startedAt = null; m.endedAt = null; ctx.save(); render();
+  }
 
   /* ---------- wiring ---------- */
   function wire() {
@@ -417,6 +524,12 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-genmatches]").forEach(b => b.addEventListener("click", () => genMatches(b.dataset.genmatches)));
     el.querySelectorAll("[data-regen]").forEach(b => b.addEventListener("click", () => regen(b.dataset.regen)));
     el.querySelectorAll("[data-score]").forEach(inp => inp.addEventListener("change", () => { const [did, mid, side] = inp.dataset.score.split(":"); setScore(did, mid, side, inp.value); }));
+    el.querySelectorAll("[data-divday]").forEach(inp => inp.addEventListener("change", () => setDivDay(inp.dataset.divday, inp.value)));
+    el.querySelectorAll("[data-court]").forEach(sel => sel.addEventListener("change", () => { const [did, mid] = sel.dataset.court.split(":"); setCourt(did, mid, sel.value); }));
+    el.querySelectorAll("[data-slottime]").forEach(inp => inp.addEventListener("change", () => { const [did, mid] = inp.dataset.slottime.split(":"); setSlotTime(did, mid, inp.value); }));
+    el.querySelectorAll("[data-startmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.startmatch.split(":"); startStamp(did, mid); }));
+    el.querySelectorAll("[data-finishmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.finishmatch.split(":"); finishStamp(did, mid); }));
+    el.querySelectorAll("[data-resettime]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.resettime.split(":"); resetStamp(did, mid); }));
     const sb = q("#tb_search");
     if (sb) {
       sb.addEventListener("input", updateBuildResults);
