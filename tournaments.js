@@ -34,6 +34,50 @@ export function createTournaments(ctx) {
   const DEFAULT_SLOT_MIN = 40; // assumed match length (configurable per tournament)
   const slotMin = t => Math.max(5, (t && t.slotMin) || DEFAULT_SLOT_MIN);
   const slotLenMs = t => slotMin(t) * 60000;
+  const warmupMin = t => (t && t.warmupMin != null) ? t.warmupMin : 5;
+  const breakMin = t => (t && t.breakMin != null) ? t.breakMin : 2;
+  const switchEvery = t => Math.max(1, (t && t.switchEvery) || 2); // switch ends every N games
+  const fmtDur = ms => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+
+  /* ---------- live ticking clock (warm-up / break countdowns, match elapsed) ---------- */
+  let ticker = null;
+  const fired = new Set(); // countdown keys that have already announced (one beep each)
+  function stopTicker() { if (ticker) { clearInterval(ticker); ticker = null; } }
+  function beep() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      const ac = new AC(); const o = ac.createOscillator(), g = ac.createGain();
+      o.connect(g); g.connect(ac.destination); o.type = "sine"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.35, ac.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.6);
+      o.start(); o.stop(ac.currentTime + 0.62);
+      setTimeout(() => { try { ac.close(); } catch (e) {} }, 900);
+    } catch (e) {}
+  }
+  function tickTimers() {
+    const now = Date.now();
+    let active = false;
+    document.querySelectorAll("[data-elapsed]").forEach(el => { el.textContent = fmtDur(now - (+el.dataset.elapsed)); active = true; });
+    document.querySelectorAll("[data-countdown]").forEach(el => {
+      const rem = (+el.dataset.countdown) - now;
+      if (rem > 0) { el.textContent = fmtDur(rem); active = true; }
+      else {
+        el.textContent = el.dataset.doneText || "time's up";
+        const box = el.closest(".timerbox"); if (box) box.classList.add("timer-done");
+        const k = el.dataset.key;
+        if (k && !fired.has(k)) { fired.add(k); beep(); }
+      }
+    });
+    if (!active) stopTicker();
+  }
+  function syncTicker() {
+    stopTicker();
+    if (detailTab !== "courts") return;
+    tickTimers(); // paint immediately
+    if (document.querySelector("[data-elapsed]") || [...document.querySelectorAll("[data-countdown]")].some(el => (+el.dataset.countdown) > Date.now()))
+      ticker = setInterval(tickTimers, 1000);
+  }
   const dayOf = d => d.day || (findT(openId) || {}).startDate || new Date().toISOString().slice(0, 10);
   const fmtClock = ms => { if (ms == null) return ""; try { return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } };
   const matchDurMin = m => (m.startedAt != null && m.endedAt != null) ? Math.max(1, Math.round((m.endedAt - m.startedAt) / 60000)) : null;
@@ -174,6 +218,7 @@ export function createTournaments(ctx) {
   function render() {
     ctx.mount.innerHTML = openId ? detailHtml(findT(openId)) : listHtml();
     wire();
+    syncTicker();
   }
 
   /* ---------- list + create ---------- */
@@ -275,7 +320,13 @@ export function createTournaments(ctx) {
         <label class="divday-lbl tiny muted" title="How many courts are in use">Courts
           <select class="divday" id="sch_courts">${[1,2,3,4,5,6,7,8].map(n => `<option ${n === t.courts ? "selected" : ""}>${n}</option>`).join("")}</select></label>
         <label class="divday-lbl tiny muted" title="Assumed length of a match, used to estimate times">Match ~mins
-          <input type="number" class="divday" id="sch_slot" min="5" max="180" step="5" value="${slotMin(t)}" style="width:70px"></label>
+          <input type="number" class="divday" id="sch_slot" min="5" max="180" step="5" value="${slotMin(t)}" style="width:66px"></label>
+        <label class="divday-lbl tiny muted" title="Warm-up countdown length">Warm-up
+          <input type="number" class="divday" id="sch_warm" min="0" max="30" value="${warmupMin(t)}" style="width:56px"></label>
+        <label class="divday-lbl tiny muted" title="Break countdown length">Break
+          <input type="number" class="divday" id="sch_break" min="0" max="30" value="${breakMin(t)}" style="width:56px"></label>
+        <label class="divday-lbl tiny muted" title="Switch ends after this many games">Switch/games
+          <input type="number" class="divday" id="sch_switch" min="1" max="12" value="${switchEvery(t)}" style="width:56px"></label>
         <label class="altcheck tiny" title="Rotate divisions so each rests between its matches">
           <input type="checkbox" id="sch_alt" ${alternate ? "checked" : ""}> Alternate divisions on the courts</label>
       </div>
@@ -322,7 +373,8 @@ export function createTournaments(ctx) {
     const aw = m.done && m.scoreA > m.scoreB, bw = m.done && m.scoreB > m.scoreA;
     const inp = side => `<input class="msc" type="number" min="0" max="99" inputmode="numeric" data-score="${d.id}:${m.id}:${side}" value="${side === "A" ? sa : sb}">`;
     let ctrl;
-    if (m.startedAt == null) ctrl = `<button class="btn sm mstart" data-startmatch="${d.id}:${m.id}:${court}">Start</button>`;
+    if (m.startedAt == null && m.warmupStart == null) ctrl = `<button class="btn sm" data-startwarm="${d.id}:${m.id}:${court}">Warm-up</button><button class="btn sm mstart" data-startmatch="${d.id}:${m.id}:${court}">Start</button>`;
+    else if (m.startedAt == null) ctrl = `<span class="mlive">◷ warming up</span><button class="btn sm primary" data-startmatch="${d.id}:${m.id}:${court}">Start</button>`;
     else if (m.endedAt == null) ctrl = `<span class="mlive">● ${fmtClock(m.startedAt)}</span><button class="btn sm primary mfinish" data-finishmatch="${d.id}:${m.id}">Finish</button>`;
     else ctrl = `<span class="mdone-t">${fmtClock(m.startedAt)}–${fmtClock(m.endedAt)}</span>`;
     return `<div class="mrow ${m.done ? "done" : ""}">
@@ -340,14 +392,15 @@ export function createTournaments(ctx) {
     // every match, tagged with its division, split into live / finished
     const all = [];
     t.divisions.forEach(d => d.matches.forEach(m => { if (m.a && m.b) all.push({ d, m }); }));
-    const liveOnes = all.filter(x => x.m.startedAt != null && x.m.endedAt == null);
+    // active = on court now: warming up or playing (not finished)
+    const activeOnes = all.filter(x => (x.m.startedAt != null || x.m.warmupStart != null) && x.m.endedAt == null && !x.m.done);
     const byCourt = {};
-    liveOnes.forEach(x => { if (x.m.court) (byCourt[x.m.court] = byCourt[x.m.court] || []).push(x); });
-    const unplaced = liveOnes.filter(x => !x.m.court);
+    activeOnes.forEach(x => { if (x.m.court) (byCourt[x.m.court] = byCourt[x.m.court] || []).push(x); });
+    const unplaced = activeOnes.filter(x => !x.m.court);
     let h = `<div class="courts">`;
     for (let n = 1; n <= courts; n++) {
       const here = (byCourt[n] || [])[0] || unplaced.shift();
-      h += courtBoardCard(n, here);
+      h += courtBoardCard(t, n, here);
     }
     h += `</div>`;
     // recent results
@@ -359,12 +412,31 @@ export function createTournaments(ctx) {
     h += `</div>`;
     return h;
   }
-  function courtBoardCard(n, x) {
+  function courtBoardCard(t, n, x) {
     if (!x) return `<div class="court free">
       <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">open</span></div>
       <div class="freebody"><p class="muted" style="margin:0;font-weight:600">No match running</p>
-        <p class="tiny faint" style="margin:0">Start a match from the Schedule to put it here.</p></div></div>`;
+        <p class="tiny faint" style="margin:0">Warm up or start a match from the Schedule to put it here.</p></div></div>`;
     const { d, m } = x;
+    const teams = `<div class="team"><div class="teamtag">Team 1</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
+      <div class="vs">VS</div>
+      <div class="team b"><div class="teamtag">Team 2</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>`;
+
+    // Phase 1 — warming up (not started yet)
+    if (m.startedAt == null && m.warmupStart != null) {
+      const end = m.warmupStart + warmupMin(t) * 60000;
+      return `<div class="court warming">
+        <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)}</span></div>
+        ${teams}
+        <div class="timerbox"><div class="timerlabel">Warm-up left</div>
+          <div class="timerval" data-countdown="${end}" data-key="wu:${m.id}" data-done-text="▶ Time to start!">${fmtDur(end - Date.now())}</div></div>
+        <div class="court-foot row" style="gap:8px;justify-content:center">
+          <button class="btn ghost sm" data-cancelwarm="${d.id}:${m.id}">Cancel</button>
+          <button class="btn cta" data-startmatch="${d.id}:${m.id}:${m.court || n}">Start match ▶</button></div>
+      </div>`;
+    }
+
+    // Phase 2 — match live
     const inTiebreak = m.scoreA === 5 && m.scoreB === 5 && !m.done;
     const gameStep = side => `<div class="livescore"><button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:dec">–</button>` +
       `<span class="sval num">${m["score" + side] == null ? 0 : m["score" + side]}</span>` +
@@ -373,19 +445,34 @@ export function createTournaments(ctx) {
       `<span class="sval num">${m["tb" + side] || 0}</span>` +
       `<button class="sbtn" data-mtb="${d.id}:${m.id}:${side}:inc">+</button></div>`;
     const step = inTiebreak ? tbStep : gameStep;
+    const games = (m.scoreA || 0) + (m.scoreB || 0);
+    const switchNow = !inTiebreak && games > 0 && games % switchEvery(t) === 0;
+    // break timer (optional, during the match)
+    let breakHtml = "";
+    if (m.breakStart != null) {
+      const bend = m.breakStart + breakMin(t) * 60000;
+      breakHtml = `<div class="timerbox break"><div class="timerlabel">Break left</div>
+        <div class="timerval" data-countdown="${bend}" data-key="br:${m.id}:${m.breakStart}" data-done-text="▶ Back on!">${fmtDur(bend - Date.now())}</div>
+        <button class="btn ghost sm" data-endbreak="${d.id}:${m.id}">End break</button></div>`;
+    }
     const cap = inTiebreak
       ? `<div class="score-cap tbcap">5–5 → Tiebreak · first to 7 points wins the match</div>`
-      : `<div class="score-cap">Race to 6 games · at 5–5 a tiebreak to 7 decides it · live since ${fmtClock(m.startedAt)}</div>`;
+      : `<div class="score-cap">Race to 6 games · tiebreak at 5–5 · switch ends every ${switchEvery(t)} games</div>`;
     return `<div class="court${inTiebreak ? " tiebreak" : ""}">
       <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)}</span>
+        <span class="matchclock" data-elapsed="${m.startedAt}" title="Time on court">${fmtDur(Date.now() - m.startedAt)}</span>
         <span class="games-badge">${m.scoreA == null ? 0 : m.scoreA}–${m.scoreB == null ? 0 : m.scoreB}</span></div>
+      ${switchNow ? `<div class="switchnote">↔ Switch ends</div>` : ""}
       <div class="team"><div class="teamtag">Team 1</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
       ${step("A")}
       <div class="vs">VS</div>
       <div class="team b"><div class="teamtag">Team 2</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>
       ${step("B")}
       ${cap}
-      <div class="court-foot"><button class="btn cta finishbtn" data-finishmatch="${d.id}:${m.id}">Match finished ✓</button></div>
+      ${breakHtml}
+      <div class="court-foot row" style="gap:8px;justify-content:center">
+        ${m.breakStart == null ? `<button class="btn ghost sm" data-startbreak="${d.id}:${m.id}">Break</button>` : ""}
+        <button class="btn cta finishbtn" data-finishmatch="${d.id}:${m.id}">Match finished ✓</button></div>
     </div>`;
   }
   const wasTiebreak = m => m.tbA != null && (m.tbA || m.tbB);
@@ -825,10 +912,33 @@ export function createTournaments(ctx) {
   }
   function startStamp(divId, matchId, court) {
     const m = findMatch(divId, matchId); if (!m) return;
-    m.startedAt = Date.now(); m.endedAt = null;
+    m.startedAt = Date.now(); m.endedAt = null; m.warmupStart = null; m.breakStart = null;
     if (court != null && court !== "") m.court = parseInt(court, 10);
     ctx.save(); render();
   }
+  function startWarmup(divId, matchId, court) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    m.warmupStart = Date.now();
+    if (court != null && court !== "") m.court = parseInt(court, 10);
+    fired.delete("wu:" + matchId);
+    ctx.save(); render();
+  }
+  function cancelWarmup(divId, matchId) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    m.warmupStart = null; fired.delete("wu:" + matchId); ctx.save(); render();
+  }
+  function startBreak(divId, matchId) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    m.breakStart = Date.now(); ctx.save(); render();
+  }
+  function endBreak(divId, matchId) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    if (m.breakStart != null) fired.delete("br:" + matchId + ":" + m.breakStart);
+    m.breakStart = null; ctx.save(); render();
+  }
+  function setWarmupMin(n) { const t = findT(openId); if (!t) return; t.warmupMin = Math.max(0, Math.min(30, parseInt(n, 10) || 0)); ctx.save(); render(); }
+  function setBreakMin(n) { const t = findT(openId); if (!t) return; t.breakMin = Math.max(0, Math.min(30, parseInt(n, 10) || 0)); ctx.save(); render(); }
+  function setSwitchEvery(n) { const t = findT(openId); if (!t) return; t.switchEvery = Math.max(1, Math.min(12, parseInt(n, 10) || 2)); ctx.save(); render(); }
   function stepScore(divId, matchId, side, dir) {
     const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
     const cur = m["score" + side] == null ? 0 : m["score" + side];
@@ -863,7 +973,7 @@ export function createTournaments(ctx) {
   function finishStamp(divId, matchId) {
     const m = findMatch(divId, matchId); if (!m) return;
     if (m.startedAt == null) m.startedAt = Date.now();
-    m.endedAt = Date.now(); ctx.save(); render();
+    m.endedAt = Date.now(); m.warmupStart = null; m.breakStart = null; ctx.save(); render();
   }
   function resetStamp(divId, matchId) {
     const m = findMatch(divId, matchId); if (!m) return;
@@ -943,6 +1053,13 @@ export function createTournaments(ctx) {
     const sc = q("#sch_courts"); if (sc) sc.addEventListener("change", () => setCourts(sc.value));
     const sa = q("#sch_alt"); if (sa) sa.addEventListener("change", () => setAlternate(sa.checked));
     const ss = q("#sch_slot"); if (ss) ss.addEventListener("change", () => setSlot(ss.value));
+    const sw = q("#sch_warm"); if (sw) sw.addEventListener("change", () => setWarmupMin(sw.value));
+    const sb2 = q("#sch_break"); if (sb2) sb2.addEventListener("change", () => setBreakMin(sb2.value));
+    const sv = q("#sch_switch"); if (sv) sv.addEventListener("change", () => setSwitchEvery(sv.value));
+    el.querySelectorAll("[data-startwarm]").forEach(b => b.addEventListener("click", () => { const [did, mid, court] = b.dataset.startwarm.split(":"); startWarmup(did, mid, court); }));
+    el.querySelectorAll("[data-cancelwarm]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.cancelwarm.split(":"); cancelWarmup(did, mid); }));
+    el.querySelectorAll("[data-startbreak]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.startbreak.split(":"); startBreak(did, mid); }));
+    el.querySelectorAll("[data-endbreak]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.endbreak.split(":"); endBreak(did, mid); }));
     el.querySelectorAll("[data-rotmove]").forEach(b => b.addEventListener("click", () => { const [day, did, dir] = b.dataset.rotmove.split(":"); moveRotation(day, did, dir); }));
     el.querySelectorAll("[data-startmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid, court] = b.dataset.startmatch.split(":"); startStamp(did, mid, court); }));
     el.querySelectorAll("[data-mscore]").forEach(b => b.addEventListener("click", () => { const [did, mid, side, dir] = b.dataset.mscore.split(":"); stepScore(did, mid, side, dir); }));
