@@ -8,7 +8,7 @@ import {
 const THEME_KEY = "courtsense_theme";
 const QUEUE_WINDOW = 8; // how far down the queue the auto-matcher looks for a level match
 const DEFAULTS = {
-  courts: 2, levelDisplay: "text", arrSeq: 0, matchCount: 0,
+  courts: 2, levelDisplay: "class", arrSeq: 0, matchCount: 0,
   pairHist: {}, oppHist: {}, lastResults: null, sessionDate: null,
   queue: [], active: [], resting: [], planned: [], planSeq: 0,
   playersSort: { key: "name", dir: 1 }, playerFilter: "all",
@@ -31,6 +31,8 @@ async function load() {
   let data;
   try { data = await store.loadAll(); } catch (e) { data = { players: [], kv: null }; }
   S = { players: data.players || [], ...DEFAULTS, ...(data.kv || {}) };
+  if (data.kv && data.kv.tierVersion !== 2) S.levelDisplay = "class"; // re-grade to letter system once
+  S.tierVersion = 2;
   S.pairHist = S.pairHist || {}; S.oppHist = S.oppHist || {};
   S.playersSort = S.playersSort || { key: "name", dir: 1 };
   if (!S.sessionDate) S.sessionDate = todayISO();
@@ -70,7 +72,7 @@ function freeCourtNums() {
 function tierChip(r) {
   const t = tierOf(r);
   const txt = S.levelDisplay === "class" ? t.cls : t.name;
-  return `<span class="tchip" data-tier="${t.key}" title="${t.name} · Class ${t.cls}">${txt}</span>`;
+  return `<span class="tchip" data-tier="${t.key}" title="${t.cls} · ${t.name}">${txt}</span>`;
 }
 function tierLegendHtml() {
   return TIERS.map((t, i) => {
@@ -78,7 +80,7 @@ function tierLegendHtml() {
     const range = i === 0 ? `under ${TIERS[1].min.toFixed(1)}`
       : (hi ? `${t.min.toFixed(1)}–${hi.toFixed(1)}` : `${t.min.toFixed(1)}+`);
     return `<div class="legendrow"><span class="tchip" data-tier="${t.key}">${t.name}</span>` +
-      `<span class="legcls">Class ${t.cls}</span><span class="legrange mono faint">${range}</span></div>`;
+      `<span class="legcls">Grade ${t.cls}</span><span class="legrange mono faint">${range}</span></div>`;
   }).join("");
 }
 
@@ -544,8 +546,8 @@ function renderPlayers() {
       <div class="row" style="gap:8px;align-items:center">
         <span class="tiny muted" style="font-weight:700">Show as</span>
         <div class="seg" role="group" aria-label="level display">
-          <button data-disp="text" aria-pressed="${S.levelDisplay === 'text'}">Text</button>
-          <button data-disp="class" aria-pressed="${S.levelDisplay === 'class'}">Class</button>
+          <button data-disp="class" aria-pressed="${S.levelDisplay === 'class'}">Grade</button>
+          <button data-disp="text" aria-pressed="${S.levelDisplay === 'text'}">Name</button>
         </div>
       </div>
     </div>
@@ -556,7 +558,7 @@ function renderPlayers() {
     </div>
     <div class="card"><div class="tablewrap"><table>
       <thead><tr>
-        ${th("name", "Player")}<th>Tier</th>${th("rating", "Level", true)}
+        ${th("name", "Player")}<th>Grade</th>${th("rating", "Level", true)}
         <th class="r">Reliability <button class="infobtn" id="relInfo" aria-label="About reliability" aria-expanded="false">i</button></th>
         ${th("record", "W–L", true)}${th("games", "Games", true)}
         <th class="r">Last move</th>
@@ -667,10 +669,10 @@ function renderHow() {
   </div>
 
   <div class="card pad explain stack">
-    <div><div class="eyebrow">Levels & classes</div><h3>From a number to a class</h3></div>
-    <p>The engine works in precise numbers (like <span class="k">3.80</span>) so a level drifts up or down game by game as players win or lose. Those numbers group into five bands you can show as words or as class letters:</p>
+    <div><div class="eyebrow">Grades</div><h3>From a number to a grade</h3></div>
+    <p>The engine works in precise numbers (like <span class="k">3.80</span>) so a level drifts up or down game by game as players win or lose. Those numbers map to eight grades, <b>D2</b> (lowest) up to <b>A1</b> (highest):</p>
     <div class="tierlegend">${tierLegendHtml()}</div>
-    <p class="tiny muted">Switch <b>Text</b> / <b>Class</b> on the Players tab. The roster lists alphabetically by default — tap <b>Level</b> to sort by rating instead.</p>
+    <p class="tiny muted">Switch <b>Grade</b> / <b>Name</b> on the Players tab. The roster lists alphabetically by default — tap <b>Level</b> to sort by rating instead.</p>
   </div>
 
   <div class="card pad explain stack">

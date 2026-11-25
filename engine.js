@@ -5,12 +5,16 @@ export const REL_SOFT = 8;   // games needed before reliability ~50%
 export const REL_CAP = 0.97; // reliability never claims total certainty
 
 // Level bands. A player's number maps to the highest band whose `min` it reaches.
+// Eight letter grades, D2 (lowest) up to A1 (highest). `key` is the colour group.
 export const TIERS = [
-  { min: 0,   name: "Beginner",           cls: "D",  key: "d"  },
-  { min: 3.0, name: "Lower Intermediate", cls: "C−", key: "cl" },
-  { min: 3.5, name: "Intermediate",       cls: "C",  key: "c"  },
-  { min: 4.0, name: "Upper Intermediate", cls: "C+", key: "cu" },
-  { min: 4.5, name: "Advanced",           cls: "B",  key: "b"  },
+  { min: 0,   name: "Beginner",           cls: "D2", key: "d" },
+  { min: 2.5, name: "Improver",           cls: "D1", key: "d" },
+  { min: 2.9, name: "Lower Intermediate", cls: "C2", key: "c" },
+  { min: 3.3, name: "Intermediate",       cls: "C1", key: "c" },
+  { min: 3.7, name: "Upper Intermediate", cls: "B2", key: "b" },
+  { min: 4.1, name: "Advanced",           cls: "B1", key: "b" },
+  { min: 4.5, name: "Open",               cls: "A2", key: "a" },
+  { min: 4.9, name: "Elite",              cls: "A1", key: "a" },
 ];
 export function tierOf(r) {
   let t = TIERS[0];
