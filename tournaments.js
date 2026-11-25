@@ -7,6 +7,14 @@ import { TIERS, tierOf } from "./engine.js";
 const CATS = [["womens", "Women's"], ["mens", "Men's"], ["mixed", "Mixed"]];
 const DISCS = [["doubles", "Doubles"], ["singles", "Singles"]];
 const GRADES = TIERS.map(t => t.cls).slice().reverse(); // A1 (highest) … D2 (lowest)
+const FORMATS = [
+  { k: "wd", cat: "womens", disc: "doubles", label: "Women's Doubles" },
+  { k: "md", cat: "mens", disc: "doubles", label: "Men's Doubles" },
+  { k: "xd", cat: "mixed", disc: "doubles", label: "Mixed Doubles" },
+  { k: "ws", cat: "womens", disc: "singles", label: "Women's Singles" },
+  { k: "ms", cat: "mens", disc: "singles", label: "Men's Singles" },
+  { k: "xs", cat: "mixed", disc: "singles", label: "Mixed Singles" },
+];
 
 export function createTournaments(ctx) {
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -22,6 +30,7 @@ export function createTournaments(ctx) {
   const fmtDate = s => { try { return new Date(s + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (e) { return s; } };
 
   let openId = null, newOpen = false, build = null; // build = { divisionId, slots: [playerId|null,…] }
+  let pf = new Set(), pg = new Set(), draft = new Map(); // division batch builder: formats, grades, staged divisions
 
   const findDiv = id => { const t = findT(openId); return t && t.divisions.find(d => d.id === id); };
 
@@ -90,17 +99,26 @@ export function createTournaments(ctx) {
           <h2 style="font-size:22px">${esc(t.name)}</h2></div>
         <button class="btn ghost sm" id="tDelete" style="color:var(--bad)">Delete</button>
       </div>`;
-    h += `<div class="card pad">
-      <div class="eyebrow" style="margin-bottom:10px">Add a division</div>
-      <div class="row wrap" style="gap:8px;align-items:flex-end">
-        <label class="field">Category<select id="dv_cat">${CATS.map(c => `<option value="${c[0]}">${c[1]}</option>`).join("")}</select></label>
-        <label class="field">Type<select id="dv_disc">${DISCS.map(d => `<option value="${d[0]}">${d[1]}</option>`).join("")}</select></label>
-        <label class="field">Grade<select id="dv_grade">${GRADES.map(g => `<option>${g}</option>`).join("")}</select></label>
-        <button class="btn primary" id="dv_add">Add division</button>
-      </div></div>`;
+    h += divisionBuilderHtml(t);
     if (!t.divisions.length) h += `<p class="tiny faint" style="margin:0">No divisions yet. Add one (e.g. Women's Doubles · C1), then enter teams from your roster.</p>`;
     h += `<div class="stack" style="gap:12px">` + t.divisions.map(d => divisionHtml(t, d)).join("") + `</div>`;
     return h;
+  }
+  function divisionBuilderHtml(t) {
+    const d = [...draft.values()], n = pf.size * pg.size;
+    return `<div class="card pad stack">
+      <div class="eyebrow">Add divisions</div>
+      <div><div class="plbl">Formats</div><div class="chips">${FORMATS.map(f => `<button class="fchip ${pf.has(f.k) ? "on" : ""}" data-pf="${f.k}"><span class="fbox"></span>${f.label}</button>`).join("")}</div></div>
+      <div><div class="plbl">Grades</div><div class="chips">${GRADES.map(g => `<span class="tchip pick ${pg.has(g) ? "sel" : ""}" data-tier="${g[0].toLowerCase()}" data-pg="${g}">${g}</span>`).join("")}</div></div>
+      <div class="row wrap" style="gap:8px">
+        <button class="btn sm primary" id="pbatch" ${n ? "" : "disabled"}>+ Add ${n ? n + " " : ""}to list</button>
+        ${d.length ? `<button class="btn sm ghost" id="pclear">Clear list</button>` : ""}
+      </div>
+      ${d.length ? `<div><div class="plbl">To create · ${d.length}</div>
+        <div class="preview">${d.map(x => `<span class="dchip">${catLabel(x.category)} ${discLabel(x.discipline)} · ${x.grade}<button class="x" data-pdel="${x.key}" aria-label="Remove">×</button></span>`).join("")}</div>
+        <button class="btn cta sm" id="pcreate" style="margin-top:10px">Create ${d.length} division${d.length > 1 ? "s" : ""}</button></div>`
+        : `<p class="tiny faint" style="margin:0">Pick formats and grades, add them to the list (stack as many batches as you like), then create them all. Duplicates are skipped.</p>`}
+    </div>`;
   }
   function divisionHtml(t, d) {
     let h = `<div class="card pad" data-div="${d.id}">
@@ -315,13 +333,21 @@ export function createTournaments(ctx) {
     tournaments().push(t); ctx.save();
     newOpen = false; openId = t.id; render();
   }
-  function addDivision() {
-    const el = ctx.mount, t = findT(openId); if (!t) return;
-    const category = el.querySelector("#dv_cat").value;
-    const discipline = el.querySelector("#dv_disc").value;
-    const grade = el.querySelector("#dv_grade").value;
-    if (t.divisions.some(d => d.category === category && d.discipline === discipline && d.grade === grade)) return;
-    t.divisions.push({ id: uid("d"), category, discipline, grade, teams: [], matches: [] });
+  function addBatch() {
+    if (!pf.size || !pg.size) return;
+    FORMATS.filter(f => pf.has(f.k)).forEach(f => pg.forEach(g => {
+      const key = f.cat + "|" + f.disc + "|" + g;
+      draft.set(key, { category: f.cat, discipline: f.disc, grade: g, key });
+    }));
+    render();
+  }
+  function createDivisions() {
+    const t = findT(openId); if (!t) return;
+    [...draft.values()].forEach(d => {
+      if (!t.divisions.some(x => x.category === d.category && x.discipline === d.discipline && x.grade === d.grade))
+        t.divisions.push({ id: uid("d"), category: d.category, discipline: d.discipline, grade: d.grade, teams: [], matches: [] });
+    });
+    draft.clear(); pf.clear(); pg.clear();
     ctx.save(); render();
   }
   function pickPlayer(pid) {
@@ -371,12 +397,17 @@ export function createTournaments(ctx) {
     q("#tNew") && q("#tNew").addEventListener("click", () => { newOpen = true; render(); });
     q("#tf_cancel") && q("#tf_cancel").addEventListener("click", () => { newOpen = false; render(); });
     q("#tf_create") && q("#tf_create").addEventListener("click", createTournament);
-    el.querySelectorAll("[data-open]").forEach(c => c.addEventListener("click", () => { openId = c.dataset.open; newOpen = false; build = null; render(); }));
-    q("#tBack") && q("#tBack").addEventListener("click", () => { openId = null; build = null; render(); });
+    el.querySelectorAll("[data-open]").forEach(c => c.addEventListener("click", () => { openId = c.dataset.open; newOpen = false; build = null; pf.clear(); pg.clear(); draft.clear(); render(); }));
+    q("#tBack") && q("#tBack").addEventListener("click", () => { openId = null; build = null; pf.clear(); pg.clear(); draft.clear(); render(); });
     q("#tDelete") && q("#tDelete").addEventListener("click", () => {
       if (confirm("Delete this tournament? This can't be undone.")) { ctx.state.tournaments = tournaments().filter(t => t.id !== openId); openId = null; build = null; ctx.save(); render(); }
     });
-    q("#dv_add") && q("#dv_add").addEventListener("click", addDivision);
+    el.querySelectorAll("[data-pf]").forEach(b => b.addEventListener("click", () => { const k = b.dataset.pf; pf.has(k) ? pf.delete(k) : pf.add(k); render(); }));
+    el.querySelectorAll("[data-pg]").forEach(b => b.addEventListener("click", () => { const g = b.dataset.pg; pg.has(g) ? pg.delete(g) : pg.add(g); render(); }));
+    q("#pbatch") && q("#pbatch").addEventListener("click", addBatch);
+    q("#pclear") && q("#pclear").addEventListener("click", () => { draft.clear(); render(); });
+    el.querySelectorAll("[data-pdel]").forEach(b => b.addEventListener("click", () => { draft.delete(b.dataset.pdel); render(); }));
+    q("#pcreate") && q("#pcreate").addEventListener("click", createDivisions);
     el.querySelectorAll("[data-deldiv]").forEach(b => b.addEventListener("click", () => { const t = findT(openId); if (t) { t.divisions = t.divisions.filter(d => d.id !== b.dataset.deldiv); ctx.save(); render(); } }));
     el.querySelectorAll("[data-delteam]").forEach(b => b.addEventListener("click", () => { const [did, tid] = b.dataset.delteam.split(":"); const d = findDiv(did); if (d) { d.teams = d.teams.filter(tm => tm.id !== tid); ctx.save(); render(); } }));
     el.querySelectorAll("[data-buildteam]").forEach(b => b.addEventListener("click", () => { const d = findDiv(b.dataset.buildteam); if (d) { build = { divisionId: d.id, slots: new Array(teamSize(d)).fill(null) }; render(); } }));
