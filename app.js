@@ -624,8 +624,14 @@ function importPanelHtml() {
   return `<div class="card pad stack" id="importPanel" ${uiImportOpen ? "" : "hidden"}>
     <div class="row spread"><div class="eyebrow">Import members</div>
       <button class="btn ghost sm" id="importClose">Close</button></div>
-    <p class="tiny muted" style="margin:0">Paste a list — one member per line. Add a level after a comma if you have it (e.g. <span class="mono">Maria Chen, 3.5</span>); otherwise everyone starts at 3.50 and the ratings sort themselves out.</p>
-    <textarea id="importText" placeholder="Maria Chen, 3.5&#10;James Reyes, 4.0&#10;Priya Singh&#10;Tom Flores, 2.5"></textarea>
+    <p class="tiny muted" style="margin:0">One member per line — <span class="mono">Name, Level, Gender</span> (level and gender optional). Load from a Google Sheet, or paste below.</p>
+    <div class="row wrap" style="gap:8px;align-items:flex-end">
+      <label class="field grow">Google Sheets link
+        <input type="text" id="sheetUrl" placeholder="Paste a Google Sheets link…" autocomplete="off"></label>
+      <button class="btn sm" id="sheetLoad">Load</button>
+    </div>
+    <span class="tiny faint" id="sheetStatus"></span>
+    <textarea id="importText" placeholder="Maria Chen, 3.5, Women&#10;James Reyes, 4.0, Men&#10;Priya Singh&#10;Tom Flores, 2.5"></textarea>
     <div class="row spread wrap">
       <span class="tiny muted" id="importCount">0 members found</span>
       <div class="row" style="gap:8px">
@@ -640,26 +646,111 @@ function wireImport(el) {
   if (!panel) return;
   const text = panel.querySelector("#importText");
   const count = panel.querySelector("#importCount");
-  const existing = new Set(S.players.map(p => p.name.toLowerCase()));
   const refresh = () => {
     const rows = parseRoster(text.value);
-    const fresh = rows.filter(r => !existing.has(r.name.toLowerCase()));
-    count.textContent = `${rows.length} found · ${fresh.length} new to add`;
-    return fresh;
+    const names = new Set(S.players.map(p => p.name.toLowerCase()));
+    const fresh = rows.filter(r => !names.has(r.name.toLowerCase()));
+    const dup = rows.length - fresh.length;
+    count.textContent = `${rows.length} found · ${fresh.length} new${dup ? ` · ${dup} already in roster` : ""}`;
+    return rows;
   };
   text.addEventListener("input", refresh);
   const close = () => { uiImportOpen = false; renderPlayers(); };
   panel.querySelector("#importClose").addEventListener("click", close);
   panel.querySelector("#importCancel").addEventListener("click", close);
+  panel.querySelector("#sheetLoad").addEventListener("click", async () => {
+    const url = panel.querySelector("#sheetUrl").value.trim();
+    const status = panel.querySelector("#sheetStatus");
+    if (!url) return;
+    status.textContent = "Loading…"; status.style.color = "var(--muted)";
+    try {
+      text.value = await fetchSheet(url);
+      refresh();
+      status.textContent = "Loaded from the sheet — check the count, then Import."; status.style.color = "var(--good)";
+    } catch (e) {
+      status.textContent = "Couldn't load — set the sheet to “Anyone with the link can view”, or File → Share → Publish to web → CSV and paste that link.";
+      status.style.color = "var(--bad)";
+    }
+  });
   panel.querySelector("#importDo").addEventListener("click", () => {
-    const fresh = refresh();
-    if (!fresh.length) { close(); return; }
-    fresh.forEach(r => S.players.push(makePlayer(r.name, r.rating)));
-    uiImportOpen = false; save(); render();
+    const rows = parseRoster(text.value);
+    if (!rows.length) { close(); return; }
+    runImport(rows);
   });
   const openBtn = el.querySelector("#openImport");
   if (openBtn) openBtn.addEventListener("click", () => { uiImportOpen = true; renderPlayers(); panel.scrollIntoView?.({ behavior: "smooth", block: "nearest" }); });
   if (uiImportOpen) text.focus();
+}
+
+/* ---------- Google Sheets + merge import ---------- */
+function sheetCsvUrl(url) {
+  url = url.trim();
+  if (/output=csv|format=csv|tqx=out:csv/.test(url)) return url;
+  const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (m) {
+    const gidM = url.match(/[#&?]gid=(\d+)/);
+    return `https://docs.google.com/spreadsheets/d/${m[1]}/gviz/tq?tqx=out:csv&gid=${gidM ? gidM[1] : "0"}`;
+  }
+  return url;
+}
+async function fetchSheet(url) {
+  const res = await fetch(sheetCsvUrl(url));
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.text();
+}
+function runImport(rows) {
+  if (!rows.length) return;
+  const byName = new Map(S.players.map(p => [p.name.toLowerCase(), p]));
+  const fresh = [], matches = [];
+  rows.forEach(r => {
+    const ex = byName.get(r.name.toLowerCase());
+    if (ex) matches.push({ row: r, existing: ex }); else fresh.push(r);
+  });
+  if (!matches.length) { applyImport(fresh, []); return; }
+  showMergeModal(fresh, matches);
+}
+function applyImport(fresh, mergeThese) {
+  fresh.forEach(r => S.players.push(makePlayer(r.name, r.rating, r.gender)));
+  mergeThese.forEach(({ row, existing }) => {
+    existing.rating = row.rating;
+    if (row.gender) existing.gender = row.gender;
+  });
+  uiImportOpen = false; save(); render();
+}
+function showMergeModal(fresh, matches) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal";
+  overlay.innerHTML = `<div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <div class="row spread" style="align-items:center"><h2 style="font-size:18px">Review import</h2>
+        <button class="btn ghost sm" data-x>Cancel</button></div>
+      <p class="tiny muted" style="margin:0"><b>${fresh.length}</b> new member${fresh.length !== 1 ? "s" : ""} will be added.
+        <b>${matches.length}</b> name${matches.length !== 1 ? "s" : ""} already in your roster — tick the ones to <b>merge</b> (updates their level &amp; gender from the sheet); unticked are left unchanged.</p>
+      <div class="row" style="gap:8px"><button class="btn ghost sm" data-all>Merge all</button><button class="btn ghost sm" data-none>Skip all</button></div>
+      <div class="stack" style="gap:6px;max-height:42vh;overflow:auto">${matches.map((m, i) => mergeRowHtml(m, i)).join("")}</div>
+      <div class="row" style="justify-content:flex-end;gap:8px">
+        <button class="btn primary" data-confirm>Confirm import</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  const checks = () => [...overlay.querySelectorAll("[data-merge]")];
+  overlay.querySelector("[data-x]").addEventListener("click", close);
+  overlay.querySelector(".modal-backdrop").addEventListener("click", close);
+  overlay.querySelector("[data-all]").addEventListener("click", () => checks().forEach(c => c.checked = true));
+  overlay.querySelector("[data-none]").addEventListener("click", () => checks().forEach(c => c.checked = false));
+  overlay.querySelector("[data-confirm]").addEventListener("click", () => {
+    const toMerge = matches.filter((m, i) => overlay.querySelector(`[data-merge="${i}"]`).checked);
+    close();
+    applyImport(fresh, toMerge);
+  });
+}
+function mergeRowHtml(m, i) {
+  const ex = m.existing, row = m.row, ch = [];
+  if (Number(ex.rating).toFixed(2) !== Number(row.rating).toFixed(2)) ch.push(`level ${Number(ex.rating).toFixed(2)}→${Number(row.rating).toFixed(2)}`);
+  if (row.gender && row.gender !== ex.gender) ch.push(`gender ${ex.gender === "f" ? "W" : ex.gender === "m" ? "M" : "—"}→${row.gender === "f" ? "W" : "M"}`);
+  return `<label class="mergerow"><input type="checkbox" data-merge="${i}" checked>
+    <span class="grow"><b>${esc(ex.name)}</b> <span class="tiny muted">${ch.length ? ch.join(" · ") : "no change"}</span></span></label>`;
 }
 
 /* ---------- How it works ---------- */
@@ -828,7 +919,7 @@ function renderHome() {
     <div class="dash">` + HOME_ITEMS.map(it => `
       <button class="dashcard" data-go="${it.k}">
         <span class="dashicon ${it.k}">${HOME_ICONS[it.k]}</span>
-        <span class="dashtext"><span class="dashtitle">${it.title}</span><span class="dashdesc">${it.desc}</span></span>
+        <span class="dashtitle">${it.title}</span>
         <span class="dashchev">→</span>
       </button>`).join("") + `</div>`;
   V.home.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => {

@@ -343,7 +343,7 @@ nav.subnav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 58px);z-index
 .dashicon.how{color:var(--t-a);background:color-mix(in srgb,var(--t-a) 15%,var(--surface))}
 .dashicon.settings{color:var(--muted);background:var(--surface-2)}
 .dashtext{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
-.dashtitle{font-family:var(--fdisplay);font-weight:800;font-size:17px}
+.dashtitle{font-family:var(--fdisplay);font-weight:800;font-size:17px;flex:1;min-width:0}
 .dashdesc{font-size:12.5px;color:var(--muted);line-height:1.4}
 .dashchev{color:var(--faint);font-size:18px;flex:none}
 @media(min-width:680px){
@@ -351,3 +351,7 @@ nav.subnav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 58px);z-index
   .dashcard{flex:1 1 230px;flex-direction:column;align-items:flex-start}
   .dashchev{display:none}
 }
+
+/* import merge-review */
+.mergerow{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:9px;padding:8px 10px;background:var(--surface);cursor:pointer}
+.mergerow input{width:17px;height:17px;accent-color:var(--court);flex:none}

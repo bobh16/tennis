@@ -130,21 +130,31 @@ export function makePlayer(name, rating = 3.5, gender = null) {
 
 // Parse pasted text or CSV into {name, rating} rows. One member per line,
 // optional level after a comma or tab. Skips blanks, a "Name" header, and duplicates.
+function parseGender(s) {
+  if (!s) return null;
+  s = s.trim().toLowerCase();
+  if (/^(f|w|female|woman|women|girl|ladies)/.test(s)) return "f";
+  if (/^(m|male|man|men|boy)/.test(s)) return "m";
+  return null;
+}
 export function parseRoster(text) {
   const out = [], seen = new Set();
   (text || "").split(/\r?\n/).forEach(line => {
     line = line.trim();
     if (!line) return;
-    const parts = line.split(/[,\t]/).map(s => s.trim());
+    const parts = line.split(/[,\t]/).map(s => s.trim().replace(/^"(.*)"$/, "$1").trim());
     const name = parts[0];
     if (!name || /^name$/i.test(name)) return;
-    let lvl = parseFloat(parts[1]);
-    if (!isFinite(lvl)) lvl = 3.5;
-    lvl = Math.max(1.5, Math.min(6, lvl));
+    let lvl = 3.5, g = null;
+    for (let i = 1; i < parts.length; i++) {
+      const n = parseFloat(parts[i]);
+      if (isFinite(n) && n >= 1 && n <= 10) lvl = Math.max(1.5, Math.min(6, n));
+      else { const gg = parseGender(parts[i]); if (gg) g = gg; }
+    }
     const key = name.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    out.push({ name, rating: Math.round(lvl * 100) / 100 });
+    out.push({ name, rating: Math.round(lvl * 100) / 100, gender: g });
   });
   return out;
 }
