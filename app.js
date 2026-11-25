@@ -231,8 +231,12 @@ function renderTonight() {
   html += `<div class="row spread wrap" style="align-items:flex-end;gap:10px">
     <div><div class="eyebrow">Open-play session</div>
       <h2 style="font-size:22px">${weekdayName(S.sessionDate)} open play</h2></div>
-    <label class="field" style="flex-direction:row;align-items:center;gap:7px;font-size:12px">
-      <span>Day</span><input type="date" id="sessionDate" value="${S.sessionDate}" style="padding:6px 9px;font-size:13px"></label>
+    <div class="row" style="gap:10px;align-items:center">
+      <label class="field" style="flex-direction:row;align-items:center;gap:7px;font-size:12px">
+        <span>Courts</span><select id="courtSel" style="padding:6px 9px;font-size:14px;font-family:var(--fmono)">${[1,2,3,4,5,6,7,8].map(n => `<option ${n === S.courts ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:7px;font-size:12px">
+        <span>Day</span><input type="date" id="sessionDate" value="${S.sessionDate}" style="padding:6px 9px;font-size:13px"></label>
+    </div>
   </div>`;
 
   // Add players
@@ -798,6 +802,9 @@ function wireTonight() {
   q("#sessionDate") && q("#sessionDate").addEventListener("change", e => {
     S.sessionDate = e.target.value || todayISO(); save(); renderTonight();
   });
+  q("#courtSel") && q("#courtSel").addEventListener("change", e => {
+    S.courts = Math.max(1, parseInt(e.target.value, 10)) || 2; save(); renderTonight();
+  });
   q("#newSession") && q("#newSession").addEventListener("click", () => {
     if (!confirm("Start a new session? This clears tonight's courts and queue. Members and ratings stay.")) return;
     newSession();
@@ -900,7 +907,7 @@ function wirePlayers() {
 /* ---------- tabs + theme + courts ---------- */
 const HOME_ITEMS = [
   { k: "tonight", title: "Open Play", desc: "Run tonight's session — queue, courts, scores and live ratings." },
-  { k: "tournaments", title: "Tournaments", desc: "Round-robins and brackets, with standings and the quotient tiebreak." },
+  { k: "tournaments", title: "Tournament", desc: "Round-robins and brackets, with standings and the quotient tiebreak." },
   { k: "players", title: "Players", desc: "Your club roster, with D2–A1 grades and reliability." },
   { k: "how", title: "How it works", desc: "Ratings, grades and the queue, explained." },
   { k: "settings", title: "Settings", desc: "Club name, logo and cloud sync." },
@@ -912,7 +919,7 @@ const HOME_ICONS = {
   how: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.5a2.4 2.4 0 0 1 4.6 1.1c0 1.6-2.2 1.9-2.2 3.4"/><path d="M12 17h.01"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg>`,
 };
-const TITLES = { home: "Home", tonight: "Open Play", players: "Players", tournaments: "Tournaments", how: "How it works" };
+const TITLES = { home: "Home", tonight: "Open Play", players: "Players", tournaments: "Tournament", how: "How it works" };
 function renderHome() {
   const name = (S.branding && S.branding.name || "").trim();
   V.home.innerHTML = `<div><div class="eyebrow">${name ? esc(name) : "Court Sense"}</div><h2 style="font-size:22px">What would you like to do?</h2></div>
@@ -1022,9 +1029,6 @@ function wireStatic() {
     try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
   });
   try { const t = localStorage.getItem(THEME_KEY); if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {}
-  const courtTop = document.getElementById("courtTop");
-  courtTop.value = S.courts;
-  courtTop.addEventListener("change", () => { S.courts = Math.max(1, parseInt(courtTop.value, 10)) || 2; save(); renderTonight(); });
 }
 
 /* ---------- boot ---------- */

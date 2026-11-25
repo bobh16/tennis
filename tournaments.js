@@ -33,7 +33,7 @@ export function createTournaments(ctx) {
   /* ---------- list + create ---------- */
   function listHtml() {
     let h = `<div class="row spread wrap" style="align-items:flex-end">
-      <div><div class="eyebrow">Competitions</div><h2 style="font-size:22px">Tournaments</h2></div>
+      <div><div class="eyebrow">Competitions</div><h2 style="font-size:22px">Tournament</h2></div>
       <button class="btn cta sm" id="tNew">+ New tournament</button></div>`;
     if (newOpen) h += newFormHtml();
     const ts = tournaments();
