@@ -90,6 +90,7 @@ function tierLegendHtml() {
 }
 
 const V = {
+  home: document.getElementById("view-home"),
   tonight: document.getElementById("view-tonight"),
   players: document.getElementById("view-players"),
   tournaments: document.getElementById("view-tournaments"),
@@ -806,9 +807,42 @@ function wirePlayers() {
 }
 
 /* ---------- tabs + theme + courts ---------- */
+const HOME_ITEMS = [
+  { k: "tonight", title: "Open Play", desc: "Run tonight's session — queue, courts, scores and live ratings." },
+  { k: "tournaments", title: "Tournaments", desc: "Round-robins and brackets, with standings and the quotient tiebreak." },
+  { k: "players", title: "Players", desc: "Your club roster, with D2–A1 grades and reliability." },
+  { k: "how", title: "How it works", desc: "Ratings, grades and the queue, explained." },
+  { k: "settings", title: "Settings", desc: "Club name, logo and cloud sync." },
+];
+const HOME_ICONS = {
+  tonight: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M4.6 7.5c4.5 2.2 4.5 6.8 0 9M19.4 7.5c-4.5 2.2-4.5 6.8 0 9"/></svg>`,
+  tournaments: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v4a5 5 0 0 1-10 0z"/><path d="M7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3"/><path d="M9.5 20h5M12 14v6"/></svg>`,
+  players: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M15 19a4.5 4.5 0 0 1 5.5-4.4"/></svg>`,
+  how: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.5a2.4 2.4 0 0 1 4.6 1.1c0 1.6-2.2 1.9-2.2 3.4"/><path d="M12 17h.01"/></svg>`,
+  settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8"/></svg>`,
+};
+const TITLES = { home: "Home", tonight: "Open Play", players: "Players", tournaments: "Tournaments", how: "How it works" };
+function renderHome() {
+  const name = (S.branding && S.branding.name || "").trim();
+  V.home.innerHTML = `<div><div class="eyebrow">${name ? esc(name) : "Court Sense"}</div><h2 style="font-size:22px">What would you like to do?</h2></div>
+    <div class="dash">` + HOME_ITEMS.map(it => `
+      <button class="dashcard" data-go="${it.k}">
+        <span class="dashicon ${it.k}">${HOME_ICONS[it.k]}</span>
+        <span class="dashtext"><span class="dashtitle">${it.title}</span><span class="dashdesc">${it.desc}</span></span>
+        <span class="dashchev">→</span>
+      </button>`).join("") + `</div>`;
+  V.home.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.go;
+    if (k === "settings") { document.getElementById("settingsBtn").click(); return; }
+    setView(k);
+  }));
+}
 function setView(v) {
   for (const k in V) V[k].hidden = (k !== v);
-  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", t.dataset.view === v));
+  const sub = document.getElementById("subnav");
+  if (v === "home") { sub.hidden = true; }
+  else { sub.hidden = false; document.getElementById("subtitle").textContent = TITLES[v] || ""; }
+  if (v === "home") renderHome();
   if (v === "how") renderHow();
   if (v === "players") renderPlayers();
   if (v === "tournaments" && Tournaments) Tournaments.render();
@@ -885,7 +919,9 @@ async function doSync() {
   }
 }
 function wireStatic() {
-  document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => setView(t.dataset.view)));
+  document.getElementById("homeBtn").addEventListener("click", () => setView("home"));
+  const brand = document.querySelector("header .brand");
+  if (brand) { brand.style.cursor = "pointer"; brand.title = "Home"; brand.addEventListener("click", () => setView("home")); }
   const themeBtn = document.getElementById("themeBtn");
   themeBtn.addEventListener("click", () => {
     const now = document.documentElement.getAttribute("data-theme");
@@ -909,7 +945,7 @@ function wireStatic() {
   Tournaments = createTournaments({ mount: V.tournaments, state: S, save, byId, tierChip });
   render();
   const start = (location.hash || "").replace("#", "");
-  setView(["tonight", "players", "tournaments", "how"].includes(start) ? start : "tonight");
+  setView(["home", "tonight", "players", "tournaments", "how"].includes(start) ? start : "home");
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
   }

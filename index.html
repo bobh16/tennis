@@ -39,15 +39,14 @@
     </div>
   </header>
 
-  <nav class="tabs"><div class="twrap" role="tablist">
-    <button class="tab" role="tab" data-view="tonight" aria-selected="true">Tonight</button>
-    <button class="tab" role="tab" data-view="players" aria-selected="false">Players</button>
-    <button class="tab" role="tab" data-view="tournaments" aria-selected="false">Tournaments</button>
-    <button class="tab" role="tab" data-view="how" aria-selected="false">How it works</button>
+  <nav class="subnav" id="subnav" hidden><div class="subwrap">
+    <button class="backbtn" id="homeBtn">← Home</button>
+    <span class="subtitle" id="subtitle"></span>
   </div></nav>
 
   <main>
-    <section id="view-tonight" class="stack"></section>
+    <section id="view-home" class="stack"></section>
+    <section id="view-tonight" class="stack" hidden></section>
     <section id="view-players" class="stack" hidden></section>
     <section id="view-tournaments" class="stack" hidden></section>
     <section id="view-how" class="stack" hidden></section>

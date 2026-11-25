@@ -326,3 +326,28 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .mrow .mt.end{text-align:right}
 .mrow .mt.win{color:var(--court)}
 .msc{width:46px;text-align:center;padding:5px 4px;font-family:var(--fmono);font-size:15px;flex:none}
+
+/* home dashboard + section sub-nav */
+nav.subnav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 58px);z-index:25;background:var(--court);box-shadow:var(--shadow)}
+.subwrap{display:flex;align-items:center;gap:12px;max-width:860px;margin:0 auto;padding:10px max(16px,env(safe-area-inset-left,0px))}
+.backbtn{background:rgba(255,255,255,.14);color:var(--on-court);border:1px solid rgba(255,255,255,.22);border-radius:8px;padding:6px 12px;font-weight:700;font-size:13px}
+.backbtn:hover{background:rgba(255,255,255,.26)}
+.subtitle{color:var(--on-court);font-family:var(--fdisplay);font-weight:800;font-size:16px}
+.dash{display:flex;flex-direction:column;gap:12px}
+.dashcard{display:flex;align-items:center;gap:14px;text-align:left;width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;cursor:pointer;font-family:var(--fbody)}
+.dashcard:hover{border-color:var(--court)}
+.dashicon{flex:none;width:46px;height:46px;border-radius:12px;display:grid;place-items:center;color:var(--court);background:color-mix(in srgb,var(--court) 12%,var(--surface))}
+.dashicon svg{width:24px;height:24px}
+.dashicon.tournaments{color:var(--t-b);background:color-mix(in srgb,var(--t-b) 15%,var(--surface))}
+.dashicon.players{color:var(--t-c);background:color-mix(in srgb,var(--t-c) 15%,var(--surface))}
+.dashicon.how{color:var(--t-a);background:color-mix(in srgb,var(--t-a) 15%,var(--surface))}
+.dashicon.settings{color:var(--muted);background:var(--surface-2)}
+.dashtext{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.dashtitle{font-family:var(--fdisplay);font-weight:800;font-size:17px}
+.dashdesc{font-size:12.5px;color:var(--muted);line-height:1.4}
+.dashchev{color:var(--faint);font-size:18px;flex:none}
+@media(min-width:680px){
+  .dash{flex-direction:row;flex-wrap:wrap}
+  .dashcard{flex:1 1 230px;flex-direction:column;align-items:flex-start}
+  .dashchev{display:none}
+}
