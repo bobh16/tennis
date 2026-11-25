@@ -330,6 +330,7 @@ export function createTournaments(ctx) {
       <span class="mt ${aw ? "win" : ""}">${aName}</span>
       ${inp("A")}<span class="faint mono">–</span>${inp("B")}
       <span class="mt end ${bw ? "win" : ""}">${bName}</span>
+      ${tbLabel(m)}
       <span class="schedctrl">${ctrl}</span>
     </div>`;
   }
@@ -364,20 +365,31 @@ export function createTournaments(ctx) {
       <div class="freebody"><p class="muted" style="margin:0;font-weight:600">No match running</p>
         <p class="tiny faint" style="margin:0">Start a match from the Schedule to put it here.</p></div></div>`;
     const { d, m } = x;
-    const big = side => `<div class="livescore"><button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:dec">–</button>` +
+    const inTiebreak = m.scoreA === 5 && m.scoreB === 5 && !m.done;
+    const gameStep = side => `<div class="livescore"><button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:dec">–</button>` +
       `<span class="sval num">${m["score" + side] == null ? 0 : m["score" + side]}</span>` +
       `<button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:inc">+</button></div>`;
-    return `<div class="court">
-      <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)}</span></div>
+    const tbStep = side => `<div class="livescore tb"><button class="sbtn" data-mtb="${d.id}:${m.id}:${side}:dec">–</button>` +
+      `<span class="sval num">${m["tb" + side] || 0}</span>` +
+      `<button class="sbtn" data-mtb="${d.id}:${m.id}:${side}:inc">+</button></div>`;
+    const step = inTiebreak ? tbStep : gameStep;
+    const cap = inTiebreak
+      ? `<div class="score-cap tbcap">5–5 → Tiebreak · first to 7 points wins the match</div>`
+      : `<div class="score-cap">Race to 6 games · at 5–5 a tiebreak to 7 decides it · live since ${fmtClock(m.startedAt)}</div>`;
+    return `<div class="court${inTiebreak ? " tiebreak" : ""}">
+      <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)}</span>
+        <span class="games-badge">${m.scoreA == null ? 0 : m.scoreA}–${m.scoreB == null ? 0 : m.scoreB}</span></div>
       <div class="team"><div class="teamtag">Team 1</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
-      ${big("A")}
+      ${step("A")}
       <div class="vs">VS</div>
       <div class="team b"><div class="teamtag">Team 2</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>
-      ${big("B")}
-      <div class="score-cap">Race to 6 · live since ${fmtClock(m.startedAt)}</div>
+      ${step("B")}
+      ${cap}
       <div class="court-foot"><button class="btn cta finishbtn" data-finishmatch="${d.id}:${m.id}">Match finished ✓</button></div>
     </div>`;
   }
+  const wasTiebreak = m => m.tbA != null && (m.tbA || m.tbB);
+  const tbLabel = m => wasTiebreak(m) ? `<span class="tbtag" title="Decided by a 7-point tiebreak">TB ${m.tbA}–${m.tbB}</span>` : "";
   function resultRow(d, m) {
     const aw = m.scoreA > m.scoreB, bw = m.scoreB > m.scoreA;
     const t = m.endedAt ? fmtClock(m.endedAt) : "";
@@ -386,6 +398,7 @@ export function createTournaments(ctx) {
       <span class="mt ${aw ? "win" : ""}">${teamName(d, m.a)}</span>
       <span class="num"><b>${m.scoreA == null ? "–" : m.scoreA}</b></span><span class="faint mono">–</span><span class="num"><b>${m.scoreB == null ? "–" : m.scoreB}</b></span>
       <span class="mt end ${bw ? "win" : ""}">${teamName(d, m.b)}</span>
+      ${tbLabel(m)}
       ${t ? `<span class="mdone-t">${t}</span>` : ""}
     </div>`;
   }
@@ -600,6 +613,7 @@ export function createTournaments(ctx) {
       <span class="faint mono">–</span>
       ${scorable ? inp("B") : `<span class="faint mono">–</span>`}
       <span class="mt end ${bw ? "win" : ""}">${bName}</span>
+      ${tbLabel(m)}
     </div>${scorable ? schedLine(d, m, t, pred) : ""}`;
   }
   function schedLine(d, m, t, pred) {
@@ -818,8 +832,31 @@ export function createTournaments(ctx) {
   function stepScore(divId, matchId, side, dir) {
     const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
     const cur = m["score" + side] == null ? 0 : m["score" + side];
-    m["score" + side] = Math.max(0, Math.min(99, cur + (dir === "inc" ? 1 : -1)));
+    let next = Math.max(0, Math.min(99, cur + (dir === "inc" ? 1 : -1)));
+    // games stop at 5 while the other side is on 5 — the tiebreak decides the 6th game
+    const other = side === "A" ? (m.scoreB || 0) : (m.scoreA || 0);
+    if (dir === "inc" && next > 5 && other === 5) next = 5;
+    m["score" + side] = next;
     m.done = m.scoreA != null && m.scoreB != null && m.scoreA !== m.scoreB;
+    if (t && t.type === "elimination") { m.winner = m.done ? (m.scoreA > m.scoreB ? m.a : m.b) : null; advanceBracket(d); }
+    ctx.save(); render();
+  }
+  // 5–5 tiebreak: straight points to 7, first to 7 takes the match 6–5.
+  function stepTiebreak(divId, matchId, side, dir) {
+    const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
+    m.tbA = m.tbA || 0; m.tbB = m.tbB || 0;
+    m["tb" + side] = Math.max(0, (m["tb" + side] || 0) + (dir === "inc" ? 1 : -1));
+    if (m.tbA >= 7 || m.tbB >= 7) {
+      // first to 7 wins the match 6–5
+      if (m.tbA > m.tbB) { m.scoreA = 6; m.scoreB = 5; } else { m.scoreB = 6; m.scoreA = 5; }
+      m.done = true;
+      if (!m.startedAt) m.startedAt = Date.now();
+      if (!m.endedAt) m.endedAt = Date.now();
+    } else {
+      // corrected back below 7 — reopen the match at 5–5
+      if (m.scoreA === 6 || m.scoreB === 6) { m.scoreA = 5; m.scoreB = 5; m.endedAt = null; }
+      m.done = false;
+    }
     if (t && t.type === "elimination") { m.winner = m.done ? (m.scoreA > m.scoreB ? m.a : m.b) : null; advanceBracket(d); }
     ctx.save(); render();
   }
@@ -909,6 +946,7 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-rotmove]").forEach(b => b.addEventListener("click", () => { const [day, did, dir] = b.dataset.rotmove.split(":"); moveRotation(day, did, dir); }));
     el.querySelectorAll("[data-startmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid, court] = b.dataset.startmatch.split(":"); startStamp(did, mid, court); }));
     el.querySelectorAll("[data-mscore]").forEach(b => b.addEventListener("click", () => { const [did, mid, side, dir] = b.dataset.mscore.split(":"); stepScore(did, mid, side, dir); }));
+    el.querySelectorAll("[data-mtb]").forEach(b => b.addEventListener("click", () => { const [did, mid, side, dir] = b.dataset.mtb.split(":"); stepTiebreak(did, mid, side, dir); }));
     el.querySelectorAll("[data-finishmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.finishmatch.split(":"); finishStamp(did, mid); }));
     el.querySelectorAll("[data-resettime]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.resettime.split(":"); resetStamp(did, mid); }));
     el.querySelectorAll("[data-calltime]").forEach(inp => inp.addEventListener("change", () => setCallTime(inp.dataset.calltime, inp.value)));
