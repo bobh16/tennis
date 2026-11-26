@@ -36,6 +36,10 @@ async function selectAll(table) {
   if (!res.ok) throw new Error(`${table}: ${res.status} ${await res.text()}`);
   return res.json();
 }
+async function deleteRow(table, id) {
+  const res = await fetch(`${BASE}/${table}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: HEADERS });
+  if (!res.ok && res.status !== 404) throw new Error(`${table} delete: ${res.status} ${await res.text()}`);
+}
 
 /* ---- row mapping (app objects <-> db rows) ---- */
 const nowISO = () => new Date().toISOString();
@@ -127,9 +131,14 @@ export async function syncNow(S) {
   S.tournaments = S.tournaments || [];
   const beforeT = stable(S.tournaments), beforeM = stable(S.players);
 
+  // propagate local deletions to the cloud before merging, so they don't come back
+  const tombstones = S.deletedTournaments || [];
+  for (const id of tombstones) { await deleteRow("tournaments", id); delete base.tournaments[id]; }
+
   const [rm, rt] = await Promise.all([selectAll("members"), selectAll("tournaments")]);
-  const remoteT = rt.map(rowToTournament);
+  const remoteT = rt.map(rowToTournament).filter(t => !tombstones.includes(t.id));
   const remoteM = rm.map(rowToMember);
+  S.deletedTournaments = [];
 
   S.tournaments = mergeList(base.tournaments ? Object.values(base.tournaments) : [], S.tournaments, remoteT, mergeTournament);
   S.players = mergeList(base.members ? Object.values(base.members) : [], S.players, remoteM, mergeMember);

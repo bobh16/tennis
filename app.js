@@ -14,7 +14,7 @@ const DEFAULTS = {
   pairHist: {}, oppHist: {}, lastResults: null, sessionDate: null,
   queue: [], active: [], resting: [], planned: [], planSeq: 0,
   playersSort: { key: "name", dir: 1 }, playerFilter: "all",
-  branding: { name: "", logo: null }, tournaments: [], liveSync: false,
+  branding: { name: "", logo: null }, tournaments: [], liveSync: false, deletedTournaments: [],
 };
 let S = { players: [] };
 let uiImportOpen = false;

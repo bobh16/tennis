@@ -1103,7 +1103,11 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-open]").forEach(c => c.addEventListener("click", () => { openId = c.dataset.open; newOpen = false; build = null; detailTab = "setup"; pf.clear(); pg.clear(); draft.clear(); render(); }));
     q("#tBack") && q("#tBack").addEventListener("click", () => { openId = null; build = null; pf.clear(); pg.clear(); draft.clear(); render(); });
     q("#tDelete") && q("#tDelete").addEventListener("click", () => {
-      if (confirm("Delete this tournament? This can't be undone.")) { ctx.state.tournaments = tournaments().filter(t => t.id !== openId); openId = null; build = null; ctx.save(); render(); }
+      if (confirm("Delete this tournament? This can't be undone.")) {
+        ctx.state.deletedTournaments = [...(ctx.state.deletedTournaments || []), openId]; // tombstone so sync removes it from the cloud too
+        ctx.state.tournaments = tournaments().filter(t => t.id !== openId);
+        openId = null; build = null; ctx.save(); render();
+      }
     });
     el.querySelectorAll("[data-pf]").forEach(b => b.addEventListener("click", () => { const k = b.dataset.pf; pf.has(k) ? pf.delete(k) : pf.add(k); render(); }));
     el.querySelectorAll("[data-pg]").forEach(b => b.addEventListener("click", () => { const g = b.dataset.pg; pg.has(g) ? pg.delete(g) : pg.add(g); render(); }));
