@@ -79,6 +79,16 @@ function tierChip(r) {
   const txt = S.levelDisplay === "class" ? t.cls : t.name;
   return `<span class="tchip" data-tier="${t.key}" title="${t.cls} · ${t.name}">${txt}</span>`;
 }
+// Letter-grade is the level people set; the numeric rating is kept internally.
+const GRADE_LETTERS = TIERS.map(t => t.cls).slice().reverse(); // A1 … D2
+const GRADE_RATING = { D2: 2.0, D1: 2.6, C2: 3.0, C1: 3.4, B2: 3.8, B1: 4.2, A2: 4.6, A1: 5.0 };
+function gradeSelect(id, current) {
+  return `<select id="${id}">` + GRADE_LETTERS.map(g => `<option value="${g}"${g === current ? " selected" : ""}>${g}</option>`).join("") + `</select>`;
+}
+function ratingForGrade(letter, currentRating) {
+  if (tierOf(currentRating).cls === letter) return currentRating; // unchanged grade keeps its number
+  return GRADE_RATING[letter] != null ? GRADE_RATING[letter] : currentRating;
+}
 function tierLegendHtml() {
   return TIERS.map((t, i) => {
     const hi = TIERS[i + 1] ? TIERS[i + 1].min : null;
@@ -559,7 +569,7 @@ function renderPlayers() {
     ${importPanelHtml()}
     <div class="card"><div class="tablewrap"><table>
       <thead><tr>
-        ${th("name", "Player")}<th>Gender</th><th>Grade</th>${th("rating", "Level", true)}<th class="r">Age</th>
+        ${th("name", "Player")}<th>Gender</th>${th("rating", "Level")}<th class="r">Age</th>
       </tr></thead>
       <tbody>${list.map(playerRow).join("")}</tbody>
     </table></div></div>
@@ -571,7 +581,7 @@ function renderPlayers() {
     <form class="card pad row wrap" id="addForm" hidden style="gap:10px;align-items:flex-end">
       <label class="field grow">Name<input type="text" id="np_name" placeholder="e.g. Alex M." autocomplete="off"></label>
       <label class="field">Gender<select id="np_gender"><option value="">—</option><option value="f">Women</option><option value="m">Men</option></select></label>
-      <label class="field">Starting level<input type="number" id="np_lvl" value="3.50" step="0.05" min="1.5" max="6" style="width:112px"></label>
+      <label class="field">Level${gradeSelect("np_grade", "C1")}</label>
       <label class="field">Age<input type="number" id="np_age" placeholder="—" min="4" max="99" style="width:84px"></label>
       <label class="field">If no age<select id="np_agegrp"><option value="junior">Junior</option><option value="adult" selected>Adult</option><option value="senior">Senior</option></select></label>
       <button class="btn primary" type="submit">Add player</button>
@@ -591,7 +601,6 @@ function playerRow(p) {
     <td><b>${esc(p.name)}</b>${p.present ? ` <span class="tiny" style="color:var(--court)">• here</span>` : ""}</td>
     <td>${genderChip(p.gender)}</td>
     <td>${tierChip(p.rating)}</td>
-    <td class="r"><span class="level">${p.rating.toFixed(2)}</span></td>
     <td class="r num">${ageDisplay(p)}</td>
   </tr>`;
 }
@@ -882,7 +891,7 @@ function wirePlayers() {
     e.preventDefault();
     const name = el.querySelector("#np_name").value.trim();
     if (!name) return;
-    const r = parseFloat(el.querySelector("#np_lvl").value) || 3.5;
+    const r = GRADE_RATING[el.querySelector("#np_grade").value] || 3.5;
     const p = makePlayer(name, r, el.querySelector("#np_gender").value || null);
     const ageV = el.querySelector("#np_age").value.trim();
     p.age = ageV === "" ? null : Math.max(4, Math.min(99, parseInt(ageV, 10) || 0));
@@ -918,7 +927,7 @@ function openProfile(pid) {
             <option value="f"${p.gender === "f" ? " selected" : ""}>Women</option>
             <option value="m"${p.gender === "m" ? " selected" : ""}>Men</option>
           </select></label>
-        <label class="field">Level<input type="number" id="pf_lvl" value="${p.rating.toFixed(2)}" step="0.05" min="1.5" max="6" style="width:110px"></label>
+        <label class="field">Level${gradeSelect("pf_grade", t.cls)}</label>
       </div>
       <div class="row wrap" style="gap:10px;align-items:flex-end">
         <label class="field">Age<input type="number" id="pf_age" value="${p.age != null ? p.age : ""}" placeholder="—" min="4" max="99" style="width:96px"></label>
@@ -928,7 +937,6 @@ function openProfile(pid) {
             <option value="adult"${(p.ageGroup || "adult") === "adult" ? " selected" : ""}>Adult</option>
             <option value="senior"${(p.ageGroup || "adult") === "senior" ? " selected" : ""}>Senior</option>
           </select></label>
-        <span class="tiny muted" style="padding-bottom:8px">Grade ${t.cls} · ${t.name}</span>
       </div>
       <div class="row spread" style="gap:8px;margin-top:4px">
         <button class="btn ghost sm" data-remove style="color:var(--bad)">Remove player</button>
@@ -943,8 +951,7 @@ function openProfile(pid) {
     const name = overlay.querySelector("#pf_name").value.trim();
     if (name) p.name = name;
     p.gender = overlay.querySelector("#pf_gender").value || null;
-    const r = parseFloat(overlay.querySelector("#pf_lvl").value);
-    if (isFinite(r)) p.rating = Math.max(1.5, Math.min(6, Math.round(r * 100) / 100));
+    p.rating = ratingForGrade(overlay.querySelector("#pf_grade").value, p.rating);
     const ageV = overlay.querySelector("#pf_age").value.trim();
     p.age = ageV === "" ? null : Math.max(4, Math.min(99, parseInt(ageV, 10) || 0));
     p.ageGroup = overlay.querySelector("#pf_agegrp").value || "adult";
