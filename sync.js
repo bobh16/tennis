@@ -43,7 +43,7 @@ async function deleteRow(table, id) {
 
 /* ---- row mapping (app objects <-> db rows) ---- */
 const nowISO = () => new Date().toISOString();
-const TFIELDS = ["alternate", "slotMin", "target", "warmupMin", "breakMin", "switchEvery"];
+const TFIELDS = ["alternate", "slotMin", "target", "warmupMin", "breakMin", "switchEvery", "format", "sets", "tGames", "tDeuces", "tTb"];
 function memberRows(players) {
   return players.map(p => ({
     id: p.id, name: p.name, rating: p.rating, gender: p.gender || null,

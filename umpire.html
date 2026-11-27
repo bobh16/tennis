@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <title>Court Sense · Umpire</title>
+  <meta name="theme-color" content="#0b2140" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#060e1b" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Umpire-only view: read-only schedule + a big split-screen tap scorer. */
+    .ump-head{background:var(--court-deep);color:var(--on-court);
+      padding:10px max(16px,env(safe-area-inset-left,0px));display:flex;align-items:center;gap:10px;
+      position:sticky;top:env(safe-area-inset-top,0px);z-index:30}
+    .ump-head .ball{width:22px;height:22px}
+    .ump-head b{font-family:var(--fdisplay);font-size:16px;font-weight:800}
+    .ump-head .role{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#9fc0e6;font-weight:700}
+    .ump-head .sp{margin-left:auto}
+    .ump-head button{background:rgba(255,255,255,.14);color:var(--on-court);border:1px solid rgba(255,255,255,.2);
+      border-radius:8px;padding:6px 10px;font-weight:700;font-size:13px}
+    .ump-tabs{display:flex;background:var(--court);position:sticky;top:calc(env(safe-area-inset-top,0px) + 44px);z-index:25}
+    .ump-tabs button{flex:1;background:none;border:none;color:#bcd6f2;font-weight:700;font-size:14px;
+      padding:12px 6px;border-bottom:3px solid transparent}
+    .ump-tabs button.on{color:var(--on-court);border-bottom-color:var(--accent)}
+    main{max-width:720px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-left,0px)) 40px}
+
+    /* court / up-next cards (read only) */
+    .u-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+      box-shadow:var(--shadow);padding:14px;margin-bottom:12px;position:relative;overflow:hidden}
+    .u-card.gbar{padding-left:18px}
+    .u-card.gbar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--gb)}
+    .u-eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:800}
+    .u-court{font-family:var(--fdisplay);font-weight:800;font-size:18px}
+    .u-teams{margin-top:8px;font-weight:600}
+    .u-vs{color:var(--faint);font-weight:800;font-size:12px;margin:2px 0}
+    .u-score{margin-left:auto;font-family:var(--fmono);font-weight:800;font-size:16px}
+    .u-row{display:flex;align-items:center;gap:10px}
+    .u-btn{display:block;width:100%;text-align:center;background:var(--accent);color:var(--on-accent);
+      border:none;border-radius:12px;font-weight:800;font-size:15px;padding:12px;margin-top:10px}
+    .u-sub{color:var(--muted);font-size:13px}
+    .u-empty{color:var(--faint);text-align:center;padding:30px 10px}
+
+    /* split-screen scorer */
+    .scorer{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;background:#000}
+    .scorer .half{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      position:relative;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;color:#fff;
+      padding:18px;text-align:center}
+    .scorer .half.a{background:var(--sideA)}
+    .scorer .half.b{background:var(--sideB)}
+    .scorer .half .tname{font-weight:700;font-size:clamp(16px,4.5vw,22px);opacity:.95;max-width:92%}
+    .scorer .half .pt{font-family:var(--fmono);font-weight:800;font-size:clamp(64px,22vw,150px);line-height:.95;
+      letter-spacing:-.02em}
+    .scorer .half .srv{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+      opacity:.9;margin-top:4px;min-height:16px}
+    .scorer .half .tap{position:absolute;bottom:14px;font-size:12px;opacity:.7;font-weight:700}
+    .scorer .mid{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2;
+      background:rgba(0,0,0,.82);color:#fff;border-radius:14px;padding:10px 16px;text-align:center;min-width:180px;
+      box-shadow:0 8px 30px rgba(0,0,0,.5)}
+    .scorer .mid .games{font-family:var(--fmono);font-weight:800;font-size:26px;letter-spacing:.04em}
+    .scorer .mid .state{font-size:12px;font-weight:700;opacity:.85;margin-top:2px}
+    .scorer .bar{position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:3;display:flex;gap:8px;
+      padding:calc(env(safe-area-inset-top,0px) + 8px) 8px 8px}
+    .scorer .bar button{background:rgba(0,0,0,.72);color:#fff;border:1px solid rgba(255,255,255,.22);
+      border-radius:999px;padding:8px 14px;font-weight:700;font-size:13px}
+    .won-ov{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+      background:rgba(6,14,27,.72);backdrop-filter:blur(3px);padding:18px}
+    .won-ov .p{background:var(--surface);color:var(--fg);border-radius:16px;padding:22px;max-width:340px;
+      width:100%;text-align:center;box-shadow:0 14px 40px rgba(0,0,0,.5)}
+    .won-ov .t{font-family:var(--fdisplay);font-weight:800;font-size:22px}
+    .won-ov .s{color:var(--muted);font-weight:600;margin:6px 0 14px}
+    .won-ov .row{display:flex;gap:8px}
+    .won-ov .row button{flex:1;border-radius:10px;padding:11px;font-weight:800;font-size:14px;border:1px solid var(--border)}
+    .won-ov .row .go{background:var(--accent);color:var(--on-accent);border-color:transparent}
+    .won-ov .row .ghost{background:var(--surface-2);color:var(--fg)}
+    .synced{font-size:12px;color:#9fc0e6}
+  </style>
+</head>
+<body>
+  <div id="app"><div class="u-empty">Loading…</div></div>
+  <script type="module" src="umpire.js"></script>
+</body>
+</html>

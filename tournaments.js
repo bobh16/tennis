@@ -3,6 +3,7 @@
 // (category + discipline + letter grade), and enter teams from the roster.
 // Matches, standings and scheduling are later phases.
 import { TIERS, tierOf } from "./engine.js";
+import { tennisCfg, pointLabel, isSuddenDeath } from "./tennis.js";
 
 const CATS = [["womens", "Women's"], ["mens", "Men's"], ["mixed", "Mixed"]];
 const DISCS = [["doubles", "Doubles"], ["singles", "Singles"]];
@@ -37,7 +38,10 @@ export function createTournaments(ctx) {
   const warmupMin = t => (t && t.warmupMin != null) ? t.warmupMin : 5;
   const breakMin = t => (t && t.breakMin != null) ? t.breakMin : 2;
   const switchEvery = t => Math.max(1, (t && t.switchEvery) || 3); // switch ends every N points on the running score
-  const targetPts = t => Math.max(2, (t && t.target) || 6); // race to this many points (default 6)
+  const isTennis = t => t && t.format === "tennis";
+  const tGamesOf = t => Math.max(1, (t && t.tGames) || 6); // games to win the set
+  const tDeucesOf = t => (t && t.tDeuces != null) ? Math.max(0, t.tDeuces) : 3; // deuces before sudden death
+  const targetPts = t => isTennis(t) ? tGamesOf(t) : Math.max(2, (t && t.target) || 6); // games (tennis) or race points
   const isSets = t => t && t.format === "sets";
   const setsOf = t => Math.max(1, (t && t.sets) || 3); // best of N
   const setsToWin = t => Math.ceil(setsOf(t) / 2);
@@ -304,7 +308,10 @@ export function createTournaments(ctx) {
       <div class="row spread wrap" style="align-items:flex-end">
         <div><div class="eyebrow">${typeLabel} · ${t.courts} court${t.courts > 1 ? "s" : ""} · ${dates}</div>
           <h2 style="font-size:22px">${esc(t.name)}</h2></div>
-        <button class="btn ghost sm" id="tDelete" style="color:var(--bad)">Delete</button>
+        <div class="row" style="gap:8px;align-items:center">
+          <a class="btn ghost sm" href="umpire.html" target="_blank" style="text-decoration:none" title="Open the umpire scoring view (share this link with umpires)">Umpire view ↗</a>
+          <button class="btn ghost sm" id="tDelete" style="color:var(--bad)">Delete</button>
+        </div>
       </div>`;
     const live = t.divisions.reduce((n, d) => n + d.matches.filter(m => m.startedAt != null && m.endedAt == null && m.a && m.b).length, 0);
     const TABS = [
@@ -352,26 +359,32 @@ export function createTournaments(ctx) {
       <div class="row wrap" style="gap:14px;align-items:center">
         <label class="divday-lbl tiny muted" title="How many courts are in use">Courts
           <select class="divday" id="sch_courts">${[1,2,3,4,5,6,7,8].map(n => `<option ${n === t.courts ? "selected" : ""}>${n}</option>`).join("")}</select></label>
-        <label class="divday-lbl tiny muted" title="Single race to a points target, or best-of-N sets">Format
+        <label class="divday-lbl tiny muted" title="How a match is won">Format
           <select class="divday" id="sch_format">
-            <option value="race" ${!isSets(t) ? "selected" : ""}>Race to points</option>
+            <option value="race" ${t.format !== "sets" && t.format !== "tennis" ? "selected" : ""}>Race to points</option>
             <option value="sets" ${isSets(t) ? "selected" : ""}>Sets</option>
+            <option value="tennis" ${isTennis(t) ? "selected" : ""}>Tennis (games)</option>
           </select></label>
-        ${isSets(t) ? `<label class="divday-lbl tiny muted" title="Best of N sets (3 = first to 2 sets)">Best of
+        ${isTennis(t) ? `<label class="divday-lbl tiny muted" title="Games to win the set (win by 2; tiebreak at games-all)">Games to win
+          <input type="number" class="divday" id="sch_tgames" min="1" max="12" value="${tGamesOf(t)}" style="width:56px"></label>
+        <label class="divday-lbl tiny muted" title="Deuces played with advantage before the next deuce becomes sudden death (0 = no-ad)">Deuces→sudden
+          <input type="number" class="divday" id="sch_tdeuces" min="0" max="10" value="${tDeucesOf(t)}" style="width:56px"></label>`
+        : `${isSets(t) ? `<label class="divday-lbl tiny muted" title="Best of N sets (3 = first to 2 sets)">Best of
           <select class="divday" id="sch_sets">${[1,3,5,7].map(n => `<option ${n === setsOf(t) ? "selected" : ""}>${n}</option>`).join("")}</select></label>` : ""}
         <label class="divday-lbl tiny muted" title="Points to win ${isSets(t) ? "a set" : "the match"} (tiebreak at one below)">${isSets(t) ? "Set to" : "Race to"}
           <input type="number" class="divday" id="sch_target" min="2" max="21" value="${targetPts(t)}" style="width:56px"></label>
+        <label class="divday-lbl tiny muted" title="Switch ends after every this many points on the running score">Switch/points
+          <input type="number" class="divday" id="sch_switch" min="1" max="12" value="${switchEvery(t)}" style="width:56px"></label>`}
         <label class="divday-lbl tiny muted" title="Assumed length of a match, used to estimate times">Match ~mins
           <input type="number" class="divday" id="sch_slot" min="5" max="180" step="5" value="${slotMin(t)}" style="width:66px"></label>
         <label class="divday-lbl tiny muted" title="Warm-up countdown length">Warm-up
           <input type="number" class="divday" id="sch_warm" min="0" max="30" value="${warmupMin(t)}" style="width:56px"></label>
         <label class="divday-lbl tiny muted" title="Break countdown length">Break
           <input type="number" class="divday" id="sch_break" min="0" max="30" value="${breakMin(t)}" style="width:56px"></label>
-        <label class="divday-lbl tiny muted" title="Switch ends after every this many points on the running score">Switch/points
-          <input type="number" class="divday" id="sch_switch" min="1" max="12" value="${switchEvery(t)}" style="width:56px"></label>
         <label class="altcheck tiny" title="Rotate divisions so each rests between its matches">
           <input type="checkbox" id="sch_alt" ${alternate ? "checked" : ""}> Alternate divisions on the courts</label>
       </div>
+      ${isTennis(t) ? `<p class="tiny muted" style="margin:0">Tennis games are scored point-by-point (15/30/40, deuce, advantage) in the <a href="umpire.html" target="_blank" style="color:var(--court);font-weight:700">Umpire view</a>. The organizer sees the running game score.</p>` : ""}
       <p class="tiny muted" style="margin:0">${alternate
         ? `Divisions take turns on the ${t.courts} court${t.courts > 1 ? "s" : ""}: one fills the courts, then rests while the next plays.`
         : `Each division plays all its matches, then the next division starts. Times run from call times and average match length.`}</p>
@@ -492,6 +505,10 @@ export function createTournaments(ctx) {
       </div>`;
     }
 
+    // Phase 2 (tennis) — games are scored point-by-point in the Umpire view; the
+    // organizer sees the running game + set score read-only, plus finish controls.
+    if (isTennis(t)) return tennisCourtCard(t, n, d, m);
+
     // Phase 2 — match live
     const tp = targetPts(t);
     const inTiebreak = m.scoreA === tp - 1 && m.scoreB === tp - 1 && !m.done;
@@ -565,6 +582,52 @@ export function createTournaments(ctx) {
       ${breakHtml}
       <div class="court-foot row" style="gap:8px;justify-content:center">
         ${m.breakStart == null ? `<button class="btn ghost sm" data-startbreak="${d.id}:${m.id}">Break</button>` : ""}
+        <button class="btn cta finishbtn" data-tryfinish="${d.id}:${m.id}">Match finished ✓</button></div>
+    </div>`;
+  }
+  function tennisCourtCard(t, n, d, m) {
+    const cfg = tennisCfg(t);
+    const sideDisp = side => {
+      if (m.tInTb) return m["tb" + side] || 0;
+      const a = m.tpA || 0, b = m.tpB || 0;
+      if (a >= 3 && b >= 3 && a !== b) return side === (a > b ? "A" : "B") ? "Ad" : "40";
+      return pointLabel(m[side === "A" ? "tpA" : "tpB"] || 0);
+    };
+    let stateTxt = "";
+    const a = m.tpA || 0, b = m.tpB || 0;
+    if (m.tInTb) stateTxt = "Tiebreak · first to 7";
+    else if (a >= 3 && b >= 3) stateTxt = a === b ? (isSuddenDeath(m, cfg) ? "Sudden death" : "Deuce") : ("Advantage Team " + (a > b ? "A" : "B"));
+    let modalHtml = "";
+    if (m.done) {
+      const aWon = (m.scoreA || 0) > (m.scoreB || 0);
+      modalHtml = `<div class="wonmodal"><div class="wonpanel">
+        <div class="woneyebrow">🏆 Set won</div>
+        <div class="wontitle">Team ${aWon ? "A" : "B"} won the match</div>
+        <div class="wonsub">${esc(teamName(d, aWon ? m.a : m.b))} · ${m.scoreA || 0}–${m.scoreB || 0} games</div>
+        <div class="wonbtns"><button class="btn cta" data-finishmatch="${d.id}:${m.id}">Finish match</button>
+          <button class="btn ghost" data-undopoint="${d.id}:${m.id}">Undo point</button></div></div></div>`;
+    } else if (finishPrompt === m.id) {
+      modalHtml = `<div class="wonmodal"><div class="wonpanel">
+        <div class="woneyebrow" style="color:var(--warn)">Hold on</div>
+        <div class="wontitle">The set isn’t finished yet</div>
+        <div class="wonsub">${m.scoreA || 0}–${m.scoreB || 0} games</div>
+        <div class="wonbtns"><button class="btn cta" data-continuematch="${m.id}">Continue match</button>
+          <button class="btn ghost" data-removequeue="${d.id}:${m.id}">Remove from queue</button></div></div></div>`;
+    }
+    return `<div class="court divcard${m.done ? " won" : ""}" data-mcard="${m.id}" style="--gbar:var(--t-${gradeKey(d)})">
+      ${modalHtml}
+      <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)} · Tennis</span>
+        <span class="matchclock" data-elapsed="${m.startedAt}" title="Time on court">${fmtDur(Date.now() - m.startedAt)}</span>
+        <span class="games-badge" title="Games">${m.scoreA || 0}–${m.scoreB || 0}</span></div>
+      <div class="team"><div class="teamtag">Team A</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
+      <div class="tpoint num">${sideDisp("A")}</div>
+      <div class="vs">${stateTxt || "VS"}</div>
+      <div class="team b"><div class="teamtag">Team B</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>
+      <div class="tpoint num">${sideDisp("B")}</div>
+      <div class="score-cap">Set to ${tGamesOf(t)} games · ${tDeucesOf(t) === 0 ? "no-ad" : tDeucesOf(t) + " deuces then sudden death"}</div>
+      <a class="btn cta finishbtn" href="umpire.html" target="_blank" style="display:block;text-align:center;text-decoration:none;margin:0 14px 10px">Score point-by-point in Umpire view ↗</a>
+      <div class="court-foot row" style="gap:8px;justify-content:center">
+        <button class="btn ghost sm" data-startbreak="${d.id}:${m.id}">Break</button>
         <button class="btn cta finishbtn" data-tryfinish="${d.id}:${m.id}">Match finished ✓</button></div>
     </div>`;
   }
@@ -1023,8 +1086,10 @@ export function createTournaments(ctx) {
     ctx.save(); render();
   }
   function setTarget(n) { const t = findT(openId); if (!t) return; t.target = Math.max(2, Math.min(21, parseInt(n, 10) || 6)); ctx.save(); render(); }
-  function setFormat(fmt) { const t = findT(openId); if (!t) return; t.format = fmt === "sets" ? "sets" : "race"; ctx.save(); render(); }
+  function setFormat(fmt) { const t = findT(openId); if (!t) return; t.format = (fmt === "sets" || fmt === "tennis") ? fmt : "race"; ctx.save(); render(); }
   function setSets(n) { const t = findT(openId); if (!t) return; t.sets = Math.max(1, Math.min(7, parseInt(n, 10) || 3)); ctx.save(); render(); }
+  function setTGames(n) { const t = findT(openId); if (!t) return; t.tGames = Math.max(1, Math.min(12, parseInt(n, 10) || 6)); ctx.save(); render(); }
+  function setTDeuces(n) { const t = findT(openId); if (!t) return; const v = parseInt(n, 10); t.tDeuces = isNaN(v) ? 3 : Math.max(0, Math.min(10, v)); ctx.save(); render(); }
   function setDivDay(divId, val) {
     const d = findDiv(divId); if (!d) return;
     d.day = val || null; ctx.save(); render();
@@ -1180,6 +1245,13 @@ export function createTournaments(ctx) {
   function undoPoint(divId, matchId) {
     const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
     const tp = targetPts(t);
+    if (isTennis(t)) {
+      // reopen the set by taking back the last game from the winner
+      const win = (m.scoreA || 0) > (m.scoreB || 0) ? "A" : "B";
+      m["score" + win] = Math.max(0, (m["score" + win] || 0) - 1);
+      m.done = false; m.endedAt = null; m.winner = null; m.tInTb = false;
+      ctx.save(); render(); return;
+    }
     if (isSets(t)) {
       // the match-winning set was just awarded — pop it back open
       if ((m.setScores || []).length) {
@@ -1290,6 +1362,8 @@ export function createTournaments(ctx) {
     const stg = q("#sch_target"); if (stg) stg.addEventListener("change", () => setTarget(stg.value));
     const sfmt = q("#sch_format"); if (sfmt) sfmt.addEventListener("change", () => setFormat(sfmt.value));
     const snum = q("#sch_sets"); if (snum) snum.addEventListener("change", () => setSets(snum.value));
+    const stg2 = q("#sch_tgames"); if (stg2) stg2.addEventListener("change", () => setTGames(stg2.value));
+    const std = q("#sch_tdeuces"); if (std) std.addEventListener("change", () => setTDeuces(std.value));
     const sw = q("#sch_warm"); if (sw) sw.addEventListener("change", () => setWarmupMin(sw.value));
     const sb2 = q("#sch_break"); if (sb2) sb2.addEventListener("change", () => setBreakMin(sb2.value));
     const sv = q("#sch_switch"); if (sv) sv.addEventListener("change", () => setSwitchEvery(sv.value));

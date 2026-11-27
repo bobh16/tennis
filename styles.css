@@ -429,6 +429,8 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .switchnote{text-align:center;font-weight:800;font-size:12px;color:var(--court);
   background:color-mix(in srgb,var(--court) 12%,transparent);border-radius:8px;padding:4px;margin:2px 0}
 .switchnote.hide{display:none}
+.tpoint{text-align:center;font-family:var(--fmono);font-weight:800;font-size:40px;line-height:1;
+  color:var(--court);margin:2px 0 6px}
 /* grade-coloured header bar on division-scoped cards */
 .divcard{position:relative;overflow:hidden}
 .divcard::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;background:var(--gbar,var(--border))}
