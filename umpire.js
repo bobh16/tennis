@@ -64,8 +64,9 @@ function divLabel(d) {
   return `${cat} ${disc} · ${d.grade || ""}`.trim();
 }
 function liveMatches(t) {
+  // on court now = started OR warming up, and not yet finished — matches the organizer's "Playing now"
   const out = [];
-  (t.divisions || []).forEach(d => (d.matches || []).forEach(m => { if (m.a && m.b && m.startedAt != null && m.endedAt == null) out.push({ d, m }); }));
+  (t.divisions || []).forEach(d => (d.matches || []).forEach(m => { if (m.a && m.b && (m.startedAt != null || m.warmupStart != null) && m.endedAt == null) out.push({ d, m }); }));
   return out.sort((x, y) => (x.m.court || 99) - (y.m.court || 99));
 }
 function upcoming(t) {
@@ -138,12 +139,13 @@ function courtsHtml(t) {
 }
 function courtCard(t, n, d, m) {
   const fmt = t.format === "tennis" ? "Tennis" : (t.format === "sets" ? "Sets" : "Race");
+  const warming = m.startedAt == null && m.warmupStart != null;
   return `<div class="u-card gbar" style="--gb:var(--t-${gradeKey(d)})">
     <div class="u-row"><span class="u-court">Court ${n}</span>
-      <span class="u-score">${m.scoreA || 0}–${m.scoreB || 0}</span></div>
+      <span class="u-score">${warming ? `<span class="u-warm">● warming up</span>` : `${m.scoreA || 0}–${m.scoreB || 0}`}</span></div>
     <div class="u-sub">${esc(divLabel(d))} · ${fmt}</div>
     <div class="u-teams">${esc(teamName(d, m.a))} <span class="u-vs">vs</span> ${esc(teamName(d, m.b))}</div>
-    <button class="u-btn" data-score="${d.id}:${m.id}">Score this match →</button></div>`;
+    <button class="u-btn" data-score="${d.id}:${m.id}">${warming ? "Open / start scoring →" : "Score this match →"}</button></div>`;
 }
 function scoreHtml(t) {
   const live = liveMatches(t);
@@ -210,6 +212,8 @@ function addPoint(side) {
   const r = resolve(); if (!r) return;
   const { t, m } = r;
   if (m.done) return;
+  // first point begins the match if it was only warming up / not started yet
+  if (m.startedAt == null) { m.startedAt = Date.now(); m.warmupStart = null; }
   if (t.format === "tennis") {
     const ev = addTennisPoint(m, side, tennisCfg(t));
     if (ev === "set") wonShown = true;
