@@ -406,6 +406,11 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
   border-radius:7px;padding:2px 8px}
 .sets-badge + .games-badge{margin-left:6px}
 .sethist{text-align:center;font-family:var(--fmono);font-size:12px;color:var(--muted);margin:2px 0 4px}
+/* match-count badges */
+.mcount{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;
+  margin-left:4px;border-radius:999px;background:color-mix(in srgb,var(--court) 16%,transparent);color:var(--court);
+  font-family:var(--fmono);font-size:11px;font-weight:800;vertical-align:middle}
+.tcount{flex:none;font-size:11px;font-weight:700;color:var(--muted);font-family:var(--fmono);white-space:nowrap;margin-right:4px}
 .switchnote{text-align:center;font-weight:800;font-size:12px;color:var(--court);
   background:color-mix(in srgb,var(--court) 12%,transparent);border-radius:8px;padding:4px;margin:2px 0}
 /* grade-coloured header bar on division-scoped cards */

@@ -587,7 +587,7 @@ export function createTournaments(ctx) {
         </div>
       </div>`;
     if (d.callTime) h += `<p class="tiny callnote" style="margin:6px 0 0">Everyone in ${divLabel(d)} should arrive by <b>${fmtClock(Date.parse(`${day}T${d.callTime}:00`))}</b> — the playing order can change, so all players need to be here.</p>`;
-    if (d.teams.length) h += `<div class="stack" style="gap:6px;margin-top:10px">` + d.teams.map((tm, i) => teamRow(d, tm, i)).join("") + `</div>`;
+    if (d.teams.length) h += `<div class="stack" style="gap:6px;margin-top:10px">` + d.teams.map((tm, i) => teamRow(d, tm, i, t)).join("") + `</div>`;
     h += teamBuilderHtml(d);
     h += matchesSectionHtml(t, d);
     return h + `</div>`;
@@ -598,6 +598,21 @@ export function createTournaments(ctx) {
     const tm = d.teams.find(x => x.id === teamId);
     if (!tm) return "—";
     return tm.players.map(pid => { const p = ctx.byId(pid); return p ? esc(p.name) : "?"; }).join(" / ");
+  }
+  const matchPlayed = m => m.endedAt != null || m.done;
+  // matches this team has finished, in its division
+  function teamPlayed(d, teamId) {
+    return d.matches.filter(m => (m.a === teamId || m.b === teamId) && matchPlayed(m)).length;
+  }
+  // matches this player has finished across every team they're on in this tournament
+  function playerPlayed(t, playerId) {
+    let n = 0;
+    (t.divisions || []).forEach(d => {
+      const mine = new Set(d.teams.filter(tm => (tm.players || []).includes(playerId)).map(tm => tm.id));
+      if (!mine.size) return;
+      d.matches.forEach(m => { if ((mine.has(m.a) || mine.has(m.b)) && matchPlayed(m)) n++; });
+    });
+    return n;
   }
   function genRoundRobin(teams) {
     const ms = [];
@@ -820,12 +835,16 @@ export function createTournaments(ctx) {
     h += standingsHtml(d, t);
     return h;
   }
-  function teamRow(d, tm, i) {
+  function teamRow(d, tm, i, t) {
     const names = tm.players.map(pid => {
       const p = ctx.byId(pid);
-      return p ? `${esc(p.name)} <span class="gradetag">${gradeOf(pid)}</span>` : "?";
+      if (!p) return "?";
+      const played = playerPlayed(t, pid);
+      return `${esc(p.name)} <span class="gradetag">${gradeOf(pid)}</span><span class="mcount" title="Matches this player has played across all divisions">${played}</span>`;
     }).join(` <span class="faint">/</span> `);
+    const tc = teamPlayed(d, tm.id);
     return `<div class="trow"><span class="tnum num">${i + 1}</span><span class="grow">${names}</span>
+      <span class="tcount" title="Matches this team has played">${tc} played</span>
       <button class="qbtn qx" data-delteam="${d.id}:${tm.id}" title="Remove ${teamSize(d) === 1 ? "player" : "team"}">×</button></div>`;
   }
   function teamBuilderHtml(d) {
