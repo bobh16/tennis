@@ -48,9 +48,8 @@ export function createTournaments(ctx) {
     m["sets" + side] = (m["sets" + side] || 0) + 1;
     m.scoreA = 0; m.scoreB = 0; m.tbA = null; m.tbB = null;
     if ((m.setsA || 0) >= setsToWin(t) || (m.setsB || 0) >= setsToWin(t)) {
-      m.done = true;
+      m.done = true; // decided — the win modal shows; the umpire taps Finish to end it
       if (!m.startedAt) m.startedAt = Date.now();
-      if (!m.endedAt) m.endedAt = Date.now();
     } else { m.done = false; }
   }
   // A match's outcome, mode-aware: who won + total points each (for the quotient).
@@ -60,7 +59,7 @@ export function createTournaments(ctx) {
       const gfA = ss.reduce((s, x) => s + x[0], 0), gfB = ss.reduce((s, x) => s + x[1], 0);
       return { aWon: (m.setsA || 0) > (m.setsB || 0), gfA, gfB, done: m.done };
     }
-    return { aWon: m.scoreA > m.scoreB, gfA: m.scoreA || 0, gfB: m.scoreB || 0, done: m.done };
+    return { aWon: (m.scoreA || 0) > (m.scoreB || 0), gfA: m.scoreA || 0, gfB: m.scoreB || 0, done: m.done };
   }
   const fmtDur = ms => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
@@ -236,6 +235,7 @@ export function createTournaments(ctx) {
 
   let openId = null, newOpen = false, build = null; // build = { divisionId, slots: [playerId|null,…] }
   let detailTab = "setup"; // setup | schedule | courts | standings
+  let finishPrompt = null; // matchId whose "no team has reached the target yet" confirm is open
   let pf = new Set(), pg = new Set(), draft = new Map(); // division batch builder: formats, grades, staged divisions
 
   const findDiv = id => { const t = findT(openId); return t && t.divisions.find(d => d.id === id); };
@@ -337,6 +337,7 @@ export function createTournaments(ctx) {
   function setupTabHtml(t) {
     let h = tDatesHtml(t) + divisionBuilderHtml(t);
     if (!t.divisions.length) return h + `<p class="tiny faint" style="margin:0">No divisions yet. Add one (e.g. Women's Doubles · C1), then enter teams from your roster.</p>`;
+    h += matchSettingsHtml(t);
     const today = todayISO();
     const sorted = [...t.divisions].sort((a, b) => {
       const da = dayOf(a), db = dayOf(b);
@@ -344,14 +345,10 @@ export function createTournaments(ctx) {
     });
     return h + `<div class="stack" style="gap:12px">` + sorted.map(d => divisionHtml(t, d, d.day && dayOf(d) !== today)).join("") + `</div>`;
   }
-  function scheduleSectionHtml(t) {
-    const days = daysOf(t).filter(day => divisionsForDay(t, day).some(d => d.matches.some(m => m.a && m.b)));
-    if (!days.length) return "";
-    const today = todayISO();
-    days.sort((a, b) => ((a === today ? 0 : 1) - (b === today ? 0 : 1)) || (a < b ? -1 : 1));
+  function matchSettingsHtml(t) {
     const alternate = t.alternate !== false;
-    let h = `<div class="card pad stack">
-      <div class="eyebrow">Schedule · shared courts</div>
+    return `<div class="card pad stack">
+      <div class="eyebrow">Match format &amp; courts</div>
       <div class="row wrap" style="gap:14px;align-items:center">
         <label class="divday-lbl tiny muted" title="How many courts are in use">Courts
           <select class="divday" id="sch_courts">${[1,2,3,4,5,6,7,8].map(n => `<option ${n === t.courts ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -376,8 +373,21 @@ export function createTournaments(ctx) {
           <input type="checkbox" id="sch_alt" ${alternate ? "checked" : ""}> Alternate divisions on the courts</label>
       </div>
       <p class="tiny muted" style="margin:0">${alternate
-        ? `Divisions take turns on the ${t.courts} court${t.courts > 1 ? "s" : ""}: one fills the courts, then rests while the next plays. Drag the order below.`
-        : `Each division plays all its matches, then the next division starts. Times run from call times and average match length.`}</p>`;
+        ? `Divisions take turns on the ${t.courts} court${t.courts > 1 ? "s" : ""}: one fills the courts, then rests while the next plays.`
+        : `Each division plays all its matches, then the next division starts. Times run from call times and average match length.`}</p>
+    </div>`;
+  }
+  function scheduleSectionHtml(t) {
+    const days = daysOf(t).filter(day => divisionsForDay(t, day).some(d => d.matches.some(m => m.a && m.b)));
+    if (!days.length) return "";
+    const today = todayISO();
+    days.sort((a, b) => ((a === today ? 0 : 1) - (b === today ? 0 : 1)) || (a < b ? -1 : 1));
+    const alternate = t.alternate !== false;
+    let h = `<div class="card pad stack">
+      <div class="eyebrow">Schedule · shared courts</div>
+      <p class="tiny muted" style="margin:0">${alternate
+        ? `Divisions take turns on the ${t.courts} court${t.courts > 1 ? "s" : ""}. Drag the order below to change who plays first.`
+        : `Each division plays all its matches in turn. Times run from call times and average match length.`}</p>`;
     days.forEach(day => {
       const blocks = buildDaySchedule(t, day);
       const isToday = day === today;
@@ -464,9 +474,9 @@ export function createTournaments(ctx) {
       <div class="freebody"><p class="muted" style="margin:0;font-weight:600">No match running</p>
         <p class="tiny faint" style="margin:0">Warm up or start a match from the Schedule to put it here.</p></div></div>`;
     const { d, m } = x;
-    const teams = `<div class="team"><div class="teamtag">Team 1</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
+    const teams = `<div class="team"><div class="teamtag">Team A</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
       <div class="vs">VS</div>
-      <div class="team b"><div class="teamtag">Team 2</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>`;
+      <div class="team b"><div class="teamtag">Team B</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>`;
 
     // Phase 1 — warming up (not started yet)
     if (m.startedAt == null && m.warmupStart != null) {
@@ -486,10 +496,10 @@ export function createTournaments(ctx) {
     const tp = targetPts(t);
     const inTiebreak = m.scoreA === tp - 1 && m.scoreB === tp - 1 && !m.done;
     const gameStep = side => `<div class="livescore"><button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:dec">–</button>` +
-      `<span class="sval num">${m["score" + side] == null ? 0 : m["score" + side]}</span>` +
+      `<span class="sval num" data-sval="${side}">${m["score" + side] == null ? 0 : m["score" + side]}</span>` +
       `<button class="sbtn" data-mscore="${d.id}:${m.id}:${side}:inc">+</button></div>`;
     const tbStep = side => `<div class="livescore tb"><button class="sbtn" data-mtb="${d.id}:${m.id}:${side}:dec">–</button>` +
-      `<span class="sval num">${m["tb" + side] || 0}</span>` +
+      `<span class="sval num" data-sval="${side}">${m["tb" + side] || 0}</span>` +
       `<button class="sbtn" data-mtb="${d.id}:${m.id}:${side}:inc">+</button></div>`;
     const step = inTiebreak ? tbStep : gameStep;
     // switch ends every N points of the running score (tiebreak points while in a tiebreak)
@@ -508,23 +518,54 @@ export function createTournaments(ctx) {
     const cap = inTiebreak
       ? `<div class="score-cap tbcap">${tp - 1}–${tp - 1} → Tiebreak · first to 7 wins the ${sets ? "set" : "match"}</div>`
       : `<div class="score-cap">${sets ? `Best of ${setsOf(t)} · set to ${tp}` : `Race to ${tp}`} · tiebreak at ${tp - 1}–${tp - 1} · switch every ${switchEvery(t)} pts</div>`;
-    return `<div class="court divcard${inTiebreak ? " tiebreak" : ""}" style="--gbar:var(--t-${gradeKey(d)})">
+    // decided but not yet finished — a modal over the card confirms the result
+    let modalHtml = "";
+    if (m.done) {
+      const aWon = matchOutcome(m, t).aWon;
+      const wname = teamName(d, aWon ? m.a : m.b);
+      const scoreTxt = sets ? `Sets ${m.setsA || 0}–${m.setsB || 0}` : `${m.scoreA ?? 0}–${m.scoreB ?? 0}`;
+      modalHtml = `<div class="wonmodal">
+        <div class="wonpanel">
+          <div class="woneyebrow">🏆 Match won</div>
+          <div class="wontitle">Team ${aWon ? "A" : "B"} won the match</div>
+          <div class="wonsub">${wname} · ${scoreTxt}</div>
+          <div class="wonbtns">
+            <button class="btn cta" data-finishmatch="${d.id}:${m.id}">Finish match</button>
+            <button class="btn ghost" data-undopoint="${d.id}:${m.id}">Undo point</button>
+          </div>
+          <p class="tiny faint" style="margin:0">Undo point reopens the score so you can fix a point given to the wrong team.</p>
+        </div></div>`;
+    } else if (finishPrompt === m.id) {
+      modalHtml = `<div class="wonmodal">
+        <div class="wonpanel">
+          <div class="woneyebrow" style="color:var(--warn)">Hold on</div>
+          <div class="wontitle">${sets ? "The match isn’t decided yet" : `No team has scored ${tp} points yet`}</div>
+          <div class="wonsub">${m.scoreA ?? 0}–${m.scoreB ?? 0}</div>
+          <div class="wonbtns">
+            <button class="btn cta" data-continuematch="${m.id}">Continue match</button>
+            <button class="btn ghost" data-removequeue="${d.id}:${m.id}">Remove from queue</button>
+          </div>
+          <p class="tiny faint" style="margin:0">Remove from queue takes this match off the court and back to the schedule, unplayed.</p>
+        </div></div>`;
+    }
+    return `<div class="court divcard${inTiebreak ? " tiebreak" : ""}${m.done ? " won" : ""}" data-mcard="${m.id}" style="--gbar:var(--t-${gradeKey(d)})">
+      ${modalHtml}
       <div class="court-hd"><span class="cn">Court ${n}</span><span class="cavg">${divLabel(d)}</span>
         <span class="matchclock" data-elapsed="${m.startedAt}" title="Time on court">${fmtDur(Date.now() - m.startedAt)}</span>
         ${sets ? `<span class="sets-badge" title="Sets won">Sets ${m.setsA || 0}–${m.setsB || 0}</span>` : ""}
         <span class="games-badge" title="${sets ? "Current set" : "Score"}">${m.scoreA == null ? 0 : m.scoreA}–${m.scoreB == null ? 0 : m.scoreB}</span></div>
       ${setHist}
-      ${switchNow ? `<div class="switchnote">↔ Switch ends</div>` : ""}
-      <div class="team"><div class="teamtag">Team 1</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
+      <div class="switchnote${switchNow ? "" : " hide"}">↔ Switch sides</div>
+      <div class="team"><div class="teamtag">Team A</div><div class="pl"><span class="nm">${teamName(d, m.a)}</span></div></div>
       ${step("A")}
       <div class="vs">VS</div>
-      <div class="team b"><div class="teamtag">Team 2</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>
+      <div class="team b"><div class="teamtag">Team B</div><div class="pl"><span class="nm">${teamName(d, m.b)}</span></div></div>
       ${step("B")}
       ${cap}
       ${breakHtml}
       <div class="court-foot row" style="gap:8px;justify-content:center">
         ${m.breakStart == null ? `<button class="btn ghost sm" data-startbreak="${d.id}:${m.id}">Break</button>` : ""}
-        <button class="btn cta finishbtn" data-finishmatch="${d.id}:${m.id}">Match finished ✓</button></div>
+        <button class="btn cta finishbtn" data-tryfinish="${d.id}:${m.id}">Match finished ✓</button></div>
     </div>`;
   }
   const wasTiebreak = m => m.tbA != null && (m.tbA || m.tbB);
@@ -1041,6 +1082,7 @@ export function createTournaments(ctx) {
   function stepScore(divId, matchId, side, dir) {
     const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
     const tp = targetPts(t);
+    const beforeTb = m.scoreA === tp - 1 && m.scoreB === tp - 1 && !m.done, beforeDone = !!m.done;
     // undo the last completed set: decrement at 0–0 pops it back open (sets mode)
     if (dir === "dec" && isSets(t) && (m.scoreA || 0) === 0 && (m.scoreB || 0) === 0 && (m.setScores || []).length) {
       const last = m.setScores.pop();
@@ -1054,21 +1096,48 @@ export function createTournaments(ctx) {
     // points stop at tp-1 while the other side is on tp-1 — the tiebreak decides it
     const other = side === "A" ? (m.scoreB || 0) : (m.scoreA || 0);
     if (dir === "inc" && next >= tp && other === tp - 1) next = tp - 1;
+    // never let a side go past the target — reaching it wins; the win modal takes over
+    if (dir === "inc" && next > tp) return;
     m["score" + side] = next;
     if (isSets(t)) {
       if (next >= tp && next - other >= 1) awardSet(m, t, side); // reached the set target with a lead
     } else {
-      // decided only when someone reaches the target with a lead (not at every unequal score)
-      m.done = m.scoreA != null && m.scoreB != null && (m.scoreA >= tp || m.scoreB >= tp) && m.scoreA !== m.scoreB;
+      // decided when a side reaches the target with a lead (0 counts, so a 6–0 shutout is a win)
+      const a = m.scoreA || 0, b = m.scoreB || 0;
+      m.done = (a >= tp || b >= tp) && a !== b;
     }
     if (t && t.type === "elimination") { m.winner = m.done ? winnerSide(m, t) : null; advanceBracket(d); }
-    ctx.save(); render();
+    ctx.save();
+    // patch the score in place for an ordinary point (no flash); full render only when
+    // crossing into/out of the tiebreak or a win, where the card's structure changes
+    const afterTb = m.scoreA === tp - 1 && m.scoreB === tp - 1 && !m.done, afterDone = !!m.done;
+    if (isSets(t) || afterTb !== beforeTb || afterDone !== beforeDone || finishPrompt) render();
+    else patchLiveScore(divId, matchId);
+  }
+  // Update just the score numbers / badge / switch note in a live court card — no re-render.
+  function patchLiveScore(divId, matchId) {
+    const t = findT(openId), m = findMatch(divId, matchId);
+    const card = ctx.mount.querySelector(`[data-mcard="${matchId}"]`);
+    if (!m || !card) { render(); return; }
+    const tp = targetPts(t);
+    const inTb = m.scoreA === tp - 1 && m.scoreB === tp - 1 && !m.done;
+    const sa = card.querySelector('[data-sval="A"]'), sb = card.querySelector('[data-sval="B"]');
+    if (sa) sa.textContent = inTb ? (m.tbA || 0) : (m.scoreA || 0);
+    if (sb) sb.textContent = inTb ? (m.tbB || 0) : (m.scoreB || 0);
+    const badge = card.querySelector('.games-badge');
+    if (badge) badge.textContent = `${m.scoreA == null ? 0 : m.scoreA}–${m.scoreB == null ? 0 : m.scoreB}`;
+    const sn = card.querySelector('.switchnote');
+    if (sn) {
+      const pts = inTb ? ((m.tbA || 0) + (m.tbB || 0)) : ((m.scoreA || 0) + (m.scoreB || 0));
+      sn.classList.toggle('hide', !(pts > 0 && pts % switchEvery(t) === 0));
+    }
   }
   const winnerSide = (m, t) => matchOutcome(m, t).aWon ? m.a : m.b;
   // (tp-1)-all tiebreak: straight points to 7, first to 7 takes the match tp–(tp-1).
   function stepTiebreak(divId, matchId, side, dir) {
     const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
     const tp = targetPts(t);
+    const beforeDone = !!m.done;
     m.tbA = m.tbA || 0; m.tbB = m.tbB || 0;
     m["tb" + side] = Math.max(0, (m["tb" + side] || 0) + (dir === "inc" ? 1 : -1));
     if (m.tbA >= 7 || m.tbB >= 7) {
@@ -1076,9 +1145,8 @@ export function createTournaments(ctx) {
       if (win === "A") { m.scoreA = tp; m.scoreB = tp - 1; } else { m.scoreB = tp; m.scoreA = tp - 1; }
       if (isSets(t)) { awardSet(m, t, win); } // the tiebreak took the set
       else {
-        m.done = true;
+        m.done = true; // decided — the win modal shows; the umpire taps Finish to end it
         if (!m.startedAt) m.startedAt = Date.now();
-        if (!m.endedAt) m.endedAt = Date.now();
       }
     } else {
       // corrected back below 7 — reopen the set at (tp-1)-all
@@ -1086,12 +1154,54 @@ export function createTournaments(ctx) {
       if (!isSets(t)) m.done = false;
     }
     if (t && t.type === "elimination") { m.winner = m.done ? winnerSide(m, t) : null; advanceBracket(d); }
-    ctx.save(); render();
+    ctx.save();
+    if (isSets(t) || !!m.done !== beforeDone || finishPrompt) render();
+    else patchLiveScore(divId, matchId);
   }
   function finishStamp(divId, matchId) {
     const m = findMatch(divId, matchId); if (!m) return;
     if (m.startedAt == null) m.startedAt = Date.now();
-    m.endedAt = Date.now(); m.warmupStart = null; m.breakStart = null; ctx.save(); render();
+    m.endedAt = Date.now(); m.warmupStart = null; m.breakStart = null; finishPrompt = null; ctx.save(); render();
+  }
+  // Footer "Match finished" — only finishes once a team has reached the target;
+  // otherwise it opens an in-card confirm (continue, or take the match off the court).
+  function tryFinish(divId, matchId) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    if (m.done) { finishStamp(divId, matchId); return; }
+    finishPrompt = matchId; render();
+  }
+  function continueMatch() { finishPrompt = null; render(); }
+  function removeFromQueue(divId, matchId) {
+    const m = findMatch(divId, matchId); if (!m) return;
+    m.startedAt = null; m.endedAt = null; m.warmupStart = null; m.breakStart = null;
+    finishPrompt = null; ctx.save(); render();
+  }
+  // Take back the deciding point so the umpire can correct the score, then reopen the match.
+  function undoPoint(divId, matchId) {
+    const t = findT(openId), d = findDiv(divId), m = findMatch(divId, matchId); if (!m) return;
+    const tp = targetPts(t);
+    if (isSets(t)) {
+      // the match-winning set was just awarded — pop it back open
+      if ((m.setScores || []).length) {
+        const last = m.setScores.pop();
+        const winner = last[0] > last[1] ? "A" : "B";
+        m["sets" + winner] = Math.max(0, (m["sets" + winner] || 0) - 1);
+        m.scoreA = last[0]; m.scoreB = last[1];
+        // if that set ended on a tiebreak, drop the winner back to 6 so it's editable
+        if ((m.tbA || 0) >= 7 || (m.tbB || 0) >= 7) { m.tbA = Math.min(m.tbA || 0, 6); m.tbB = Math.min(m.tbB || 0, 6); m.scoreA = tp - 1; m.scoreB = tp - 1; }
+      }
+    } else if ((m.tbA || 0) >= 7 || (m.tbB || 0) >= 7) {
+      // tiebreak-decided match: take back the 7th tiebreak point, back to (tp-1)-all
+      const win = (m.tbA || 0) > (m.tbB || 0) ? "A" : "B";
+      m["tb" + win] = 6; m.scoreA = tp - 1; m.scoreB = tp - 1;
+    } else {
+      // normal race win: decrement whichever side reached the target
+      const win = (m.scoreA || 0) >= tp ? "A" : "B";
+      m["score" + win] = Math.max(0, (m["score" + win] || 0) - 1);
+    }
+    m.done = false; m.endedAt = null; m.winner = null;
+    if (t && t.type === "elimination") advanceBracket(d);
+    ctx.save(); render();
   }
   function resetStamp(divId, matchId) {
     const m = findMatch(divId, matchId); if (!m) return;
@@ -1192,6 +1302,10 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-mscore]").forEach(b => b.addEventListener("click", () => { const [did, mid, side, dir] = b.dataset.mscore.split(":"); stepScore(did, mid, side, dir); }));
     el.querySelectorAll("[data-mtb]").forEach(b => b.addEventListener("click", () => { const [did, mid, side, dir] = b.dataset.mtb.split(":"); stepTiebreak(did, mid, side, dir); }));
     el.querySelectorAll("[data-finishmatch]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.finishmatch.split(":"); finishStamp(did, mid); }));
+    el.querySelectorAll("[data-tryfinish]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.tryfinish.split(":"); tryFinish(did, mid); }));
+    el.querySelectorAll("[data-continuematch]").forEach(b => b.addEventListener("click", () => continueMatch()));
+    el.querySelectorAll("[data-removequeue]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.removequeue.split(":"); removeFromQueue(did, mid); }));
+    el.querySelectorAll("[data-undopoint]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.undopoint.split(":"); undoPoint(did, mid); }));
     el.querySelectorAll("[data-resettime]").forEach(b => b.addEventListener("click", () => { const [did, mid] = b.dataset.resettime.split(":"); resetStamp(did, mid); }));
     el.querySelectorAll("[data-calltime]").forEach(inp => inp.addEventListener("change", () => setCallTime(inp.dataset.calltime, inp.value)));
     el.querySelectorAll("[data-shuffle]").forEach(b => b.addEventListener("click", () => shuffleOrder(b.dataset.shuffle)));
