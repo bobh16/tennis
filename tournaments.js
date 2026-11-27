@@ -1118,6 +1118,9 @@ export function createTournaments(ctx) {
   function startStamp(divId, matchId, court) {
     const m = findMatch(divId, matchId); if (!m) return;
     m.startedAt = Date.now(); m.endedAt = null; m.warmupStart = null; m.breakStart = null;
+    // a match begins at love — clear any stale within-game tennis point state
+    m.tpA = 0; m.tpB = 0; m.tDeuces = 0; m.tInTb = false; m.tbA = 0; m.tbB = 0;
+    if (!m.tServer) m.tServer = "A";
     if (court != null && court !== "") m.court = parseInt(court, 10);
     ctx.save(); render();
   }
