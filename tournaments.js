@@ -558,7 +558,7 @@ export function createTournaments(ctx) {
     return `<div class="card pad stack">
       <div class="eyebrow">Add divisions</div>
       <div><div class="plbl">Formats</div><div class="chips">${FORMATS.map(f => `<button class="fchip ${pf.has(f.k) ? "on" : ""}" data-pf="${f.k}"><span class="fbox"></span>${f.label}</button>`).join("")}</div></div>
-      <div><div class="plbl">Grades</div><div class="chips">${GRADES.map(g => `<span class="tchip pick ${pg.has(g) ? "sel" : ""}" data-tier="${g[0].toLowerCase()}" data-pg="${g}">${g}</span>`).join("")}</div></div>
+      <div><div class="plbl">Grades</div><div class="chips">${GRADES.slice().reverse().map(g => `<span class="tchip pick ${pg.has(g) ? "sel" : ""}" data-tier="${g[0].toLowerCase()}" data-pg="${g}">${g}</span>`).join("")}</div></div>
       <div class="row wrap" style="gap:8px">
         <button class="btn sm primary" id="pbatch" ${n ? "" : "disabled"}>+ Add ${n ? n + " " : ""}to list</button>
         ${d.length ? `<button class="btn sm ghost" id="pclear">Clear list</button>` : ""}

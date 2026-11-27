@@ -80,7 +80,7 @@ function tierChip(r) {
   return `<span class="tchip" data-tier="${t.key}" title="${t.cls} · ${t.name}">${txt}</span>`;
 }
 // Letter-grade is the level people set; the numeric rating is kept internally.
-const GRADE_LETTERS = TIERS.map(t => t.cls).slice().reverse(); // A1 … D2
+const GRADE_LETTERS = TIERS.map(t => t.cls); // D2 (lowest) … A1 (highest)
 const GRADE_RATING = { D2: 2.0, D1: 2.6, C2: 3.0, C1: 3.4, B2: 3.8, B1: 4.2, A2: 4.6, A1: 5.0 };
 function gradeSelect(id, current) {
   return `<select id="${id}">` + GRADE_LETTERS.map(g => `<option value="${g}"${g === current ? " selected" : ""}>${g}</option>`).join("") + `</select>`;
