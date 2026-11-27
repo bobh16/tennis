@@ -86,20 +86,27 @@ function pick(b, l, r) {
   if (b === undefined) return r !== undefined ? r : l;
   return stable(l) !== stable(b) ? l : r;
 }
-// For a list of {id,...} objects: union by id; present on one side only -> keep it;
-// on both -> if local changed since base keep local, else take remote. `after`
-// lets callers deep-merge children instead of taking a whole object.
+// 3-way merge of a list of {id,...} objects, with add AND delete support.
+// Present on both sides -> `after` deep-merges (or local-if-changed-else-remote).
+// Present on one side only, the base tells add from delete: an id in the base but
+// gone from one side was deleted there, and stays deleted unless the other side
+// changed it since the base (an edit wins over a concurrent delete); an id absent
+// from the base is a genuine addition and is kept. Order: local first, then
+// remote-only additions.
 function mergeList(bArr, lArr, rArr, after) {
   const byId = a => { const m = {}; (a || []).forEach(x => { m[x.id] = x; }); return m; };
   const B = byId(bArr), L = byId(lArr), R = byId(rArr);
+  const pickItem = id => {
+    const b = B[id], l = L[id], r = R[id];
+    if (l && r) return after ? after(b, l, r) : (b && stable(l) !== stable(b) ? l : r);
+    if (l) return (b && stable(l) === stable(b)) ? undefined : l; // remote deleted it: drop unless local edited it
+    if (r) return (b && stable(r) === stable(b)) ? undefined : r; // local deleted it: drop unless remote edited it
+    return undefined; // in base only -> deleted on both sides
+  };
   const out = [], seen = new Set();
-  Object.keys(L).forEach(id => {
-    seen.add(id);
-    const l = L[id], r = R[id], b = B[id];
-    if (!r) { out.push(l); return; }
-    out.push(after ? after(b, l, r) : (b && stable(l) !== stable(b) ? l : r));
-  });
-  Object.keys(R).forEach(id => { if (!seen.has(id)) out.push(R[id]); }); // remote-only additions
+  const add = x => { if (seen.has(x.id)) return; seen.add(x.id); const v = pickItem(x.id); if (v !== undefined) out.push(v); };
+  (lArr || []).forEach(add);
+  (rArr || []).forEach(add);
   return out;
 }
 function mergeDivision(b, l, r) {
