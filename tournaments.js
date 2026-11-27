@@ -323,8 +323,19 @@ export function createTournaments(ctx) {
     h += `</div>`;
     return h;
   }
+  function tDatesHtml(t) {
+    return `<div class="card pad datesbar">
+      <div class="row wrap" style="gap:14px;align-items:flex-end">
+        <label class="divday-lbl tiny muted" title="First day of the tournament">Start date
+          <input type="date" id="tf_estart" value="${t.startDate || ""}"></label>
+        <label class="divday-lbl tiny muted" title="Last day — leave same as start for a one-day event">End date
+          <input type="date" id="tf_eend" value="${t.endDate || t.startDate || ""}"></label>
+        <span class="tiny faint">Each division can play on any day in this range.</span>
+      </div>
+    </div>`;
+  }
   function setupTabHtml(t) {
-    let h = divisionBuilderHtml(t);
+    let h = tDatesHtml(t) + divisionBuilderHtml(t);
     if (!t.divisions.length) return h + `<p class="tiny faint" style="margin:0">No divisions yet. Add one (e.g. Women's Doubles · C1), then enter teams from your roster.</p>`;
     const today = todayISO();
     const sorted = [...t.divisions].sort((a, b) => {
@@ -580,7 +591,7 @@ export function createTournaments(ctx) {
           <div class="tiny muted">${d.teams.length} ${teamSize(d) === 1 ? "player" : "team"}${d.teams.length !== 1 ? "s" : ""} · ${weekdayOf(day)}${callTxt}</div></div>
         <div class="row" style="gap:6px;align-items:center;flex:none">
           <label class="divday-lbl tiny muted" title="Day this division plays">${weekdayOf(day).slice(0,3)}
-            <input type="date" class="divday" data-divday="${d.id}" value="${day}" min="${t.startDate}" max="${t.endDate}"></label>
+            <input type="date" class="divday" data-divday="${d.id}" value="${day}"></label>
           <label class="divday-lbl tiny muted" title="Call time — when everyone in this division should arrive">Call
             <input type="time" class="divday" data-calltime="${d.id}" value="${d.callTime || ""}"></label>
           <button class="qbtn qx" data-deldiv="${d.id}" title="Remove division">×</button>
@@ -864,8 +875,10 @@ export function createTournaments(ctx) {
     return `<div class="card pad" style="margin-top:10px;background:var(--surface-2)">
       <div class="eyebrow" style="margin-bottom:6px">${teamSize(d2) === 1 ? "New player" : "New team — 2 players"}</div>
       <div class="row wrap" style="gap:8px;margin-bottom:8px">${slots}</div>
-      <input type="text" id="tb_search" placeholder="Search roster — ${catLabel(d.category)} ${d.grade} highlighted" autocomplete="off">
-      <div id="tb_results" class="stack rosterbox" style="gap:5px;margin-top:6px"></div>
+      <div class="tb-field">
+        <input type="text" id="tb_search" placeholder="Search roster — ${catLabel(d.category)} ${d.grade} highlighted" autocomplete="off">
+        <div id="tb_results" class="stack rosterbox" style="gap:5px"></div>
+      </div>
       <div class="row" style="gap:8px;justify-content:flex-end;margin-top:8px">
         <button class="btn ghost sm" data-cancelbuild="1">Cancel</button>
         <button class="btn primary sm" data-addteam="${d.id}" ${full ? "" : "disabled"}>Add ${teamSize(d2) === 1 ? "player" : "team"}</button>
@@ -974,6 +987,18 @@ export function createTournaments(ctx) {
   function setDivDay(divId, val) {
     const d = findDiv(divId); if (!d) return;
     d.day = val || null; ctx.save(); render();
+  }
+  function setStartDate(val) {
+    const t = findT(openId); if (!t || !val) return;
+    t.startDate = val;
+    if (!t.endDate || t.endDate < val) t.endDate = val;
+    ctx.save(); render();
+  }
+  function setEndDate(val) {
+    const t = findT(openId); if (!t || !val) return;
+    t.endDate = val;
+    if (!t.startDate || t.startDate > val) t.startDate = val;
+    ctx.save(); render();
   }
   function findMatch(divId, matchId) { const d = findDiv(divId); return d && d.matches.find(x => x.id === matchId); }
   function setCourt(divId, matchId, val) {
@@ -1144,6 +1169,8 @@ export function createTournaments(ctx) {
     el.querySelectorAll("[data-regen]").forEach(b => b.addEventListener("click", () => regen(b.dataset.regen)));
     el.querySelectorAll("[data-score]").forEach(inp => inp.addEventListener("change", () => { const [did, mid, side] = inp.dataset.score.split(":"); setScore(did, mid, side, inp.value); }));
     el.querySelectorAll("[data-divday]").forEach(inp => inp.addEventListener("change", () => setDivDay(inp.dataset.divday, inp.value)));
+    { const es = q("#tf_estart"); if (es) es.addEventListener("change", () => setStartDate(es.value)); }
+    { const ee = q("#tf_eend"); if (ee) ee.addEventListener("change", () => setEndDate(ee.value)); }
     el.querySelectorAll("[data-court]").forEach(sel => sel.addEventListener("change", () => { const [did, mid] = sel.dataset.court.split(":"); setCourt(did, mid, sel.value); }));
     el.querySelectorAll("[data-slottime]").forEach(inp => inp.addEventListener("change", () => { const [did, mid] = inp.dataset.slottime.split(":"); setSlotTime(did, mid, inp.value); }));
     el.querySelectorAll("[data-ttab]").forEach(b => b.addEventListener("click", () => { detailTab = b.dataset.ttab; render(); }));
